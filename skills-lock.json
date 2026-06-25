@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "building-native-ui": {
+      "source": "expo/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/expo/skills/building-native-ui/SKILL.md",
+      "computedHash": "b4c017a718e9ff4d2ba06515006beda3358bd5b1f4ff31f49c90b7e51118811b"
+    },
+    "expo-tailwind-setup": {
+      "source": "expo/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/expo/skills/expo-tailwind-setup/SKILL.md",
+      "computedHash": "85d932863950a9837dd4ab528c2908eff7c119e8c7f59c47963815ee7341e826"
+    },
+    "native-data-fetching": {
+      "source": "expo/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/expo/skills/native-data-fetching/SKILL.md",
+      "computedHash": "21253dd72e2afa0cc0a6693295f043af3b149fa250c7aedef4d33144e69258ff"
+    }
+  }
+}

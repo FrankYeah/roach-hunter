@@ -7,15 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
 import { ADDONS, BRAND, CHASE_FEE, TARGET_TIERS, type TargetTier } from '@/constants/brand';
+import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { CURRENT_USER } from '@/data/hunters';
-
-const cardShadow = {
-  shadowColor: '#2A2521',
-  shadowOpacity: 0.08,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 4 },
-  elevation: 3,
-};
 
 /** 現場狀況選項卡 */
 function TierCard({
@@ -28,12 +21,18 @@ function TierCard({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} className="mb-3">
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${tier.label}，${tier.hint}，指導價 ${tier.price} 元`}
+      className="mb-3"
+    >
       <View
         className={`flex-row items-center rounded-3xl border-2 px-4 py-4 ${
           selected ? 'border-sos bg-sos/10' : 'border-wood-100 bg-white'
         }`}
-        style={selected ? undefined : cardShadow}
+        style={selected ? undefined : shadowSoft}
       >
         {/* 用馬賽克方塊大小隱喻體型 */}
         <View className="h-16 w-16 items-center justify-center rounded-2xl bg-cream">
@@ -79,6 +78,8 @@ export default function OrderScreen() {
       <View className="flex-row items-center px-4 pb-2 pt-1">
         <Pressable
           onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="返回"
           className="h-10 w-10 items-center justify-center rounded-full bg-cream"
         >
           <Ionicons name="chevron-back" size={22} color="#2A2521" />
@@ -91,7 +92,7 @@ export default function OrderScreen() {
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
         {/* 地點 */}
-        <View className="mb-5 mt-2 flex-row items-center rounded-3xl bg-cream px-4 py-3" style={cardShadow}>
+        <View className="mb-5 mt-2 flex-row items-center rounded-3xl bg-cream px-4 py-3" style={shadowSoft}>
           <View className="h-9 w-9 items-center justify-center rounded-full bg-wood-300">
             <Ionicons name="location" size={18} color="#FFFFFF" />
           </View>
@@ -122,12 +123,19 @@ export default function OrderScreen() {
         {ADDONS.map((a) => {
           const on = addonIds.includes(a.id);
           return (
-            <Pressable key={a.id} onPress={() => toggleAddon(a.id)} className="mb-3">
+            <Pressable
+              key={a.id}
+              onPress={() => toggleAddon(a.id)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: on }}
+              accessibilityLabel={`加購 ${a.label}，${a.price} 元`}
+              className="mb-3"
+            >
               <View
                 className={`flex-row items-center rounded-3xl border-2 px-4 py-3 ${
                   on ? 'border-leaf bg-leaf/10' : 'border-wood-100 bg-white'
                 }`}
-                style={on ? undefined : cardShadow}
+                style={on ? undefined : shadowSoft}
               >
                 <View
                   className={`h-6 w-6 items-center justify-center rounded-md border-2 ${
@@ -148,7 +156,7 @@ export default function OrderScreen() {
       </ScrollView>
 
       {/* 底部結算列 */}
-      <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3" style={cardShadow}>
+      <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3" style={shadowSoft}>
         <View className="mb-2 flex-row items-end justify-between">
           <Text className="text-xs text-mute">指導價（實際以結案為準）</Text>
           <Text className="text-2xl font-black text-ink">
@@ -158,16 +166,9 @@ export default function OrderScreen() {
         </View>
         <Pressable
           onPress={() => router.push('/status')}
-          style={({ pressed }) => [
-            {
-              shadowColor: '#E2553A',
-              shadowOpacity: 0.4,
-              shadowRadius: 16,
-              shadowOffset: { width: 0, height: 8 },
-              elevation: 8,
-              transform: [{ scale: pressed ? 0.98 : 1 }],
-            },
-          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`確認呼救，指導價 ${total} 元起，開始媒合獵人`}
+          style={({ pressed }) => [shadowSos, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
             <Ionicons name="flash" size={20} color="#FFFFFF" />

@@ -7,15 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND } from '@/constants/brand';
+import { shadowSoft } from '@/constants/shadows';
 import { CURRENT_USER, NEARBY_HUNTERS } from '@/data/hunters';
-
-const cardShadow = {
-  shadowColor: '#2A2521',
-  shadowOpacity: 0.08,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 4 },
-  elevation: 3,
-};
 
 const hunter = NEARBY_HUNTERS[0];
 const PRAISE_TAGS = ['手腳俐落', '很準時', '有禮貌', '善後乾淨', '一擊必殺'];
@@ -59,6 +52,8 @@ export default function ReviewScreen() {
         <Text className="text-xl font-black text-ink">任務完成！</Text>
         <Pressable
           onPress={() => router.replace('/')}
+          accessibilityRole="button"
+          accessibilityLabel="關閉，回到首頁"
           className="h-10 w-10 items-center justify-center rounded-full bg-cream"
         >
           <Ionicons name="close" size={20} color="#2A2521" />
@@ -67,11 +62,11 @@ export default function ReviewScreen() {
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
         {/* 成功封印 */}
-        <View className="mt-2 items-center rounded-[28px] bg-cream py-7" style={cardShadow}>
+        <View className="mt-2 items-center rounded-[28px] bg-cream py-7" style={shadowSoft}>
           <View className="opacity-30">
             <MosaicTarget size={48} vibrate={false} />
           </View>
-          <View className="-mt-6 h-14 w-14 items-center justify-center rounded-full bg-leaf" style={cardShadow}>
+          <View className="-mt-6 h-14 w-14 items-center justify-center rounded-full bg-leaf" style={shadowSoft}>
             <Ionicons name="checkmark" size={30} color="#FFFFFF" />
           </View>
           <Text className="mt-3 text-lg font-black text-ink">那個・已退散 🎉</Text>
@@ -81,7 +76,7 @@ export default function ReviewScreen() {
         {/* 解鎖稱號動畫卡 */}
         <Animated.View
           className="mt-5 overflow-hidden rounded-[28px] bg-ink p-5"
-          style={[{ transform: [{ scale: cardScale }], opacity: reveal }, cardShadow]}
+          style={[{ transform: [{ scale: cardScale }], opacity: reveal }, shadowSoft]}
         >
           <View className="flex-row items-center">
             <MaterialCommunityIcons name="trophy-variant" size={18} color="#C3C9D2" />
@@ -109,10 +104,17 @@ export default function ReviewScreen() {
 
         {/* 幫獵人評分 */}
         <Text className="mb-3 mt-6 text-base font-black text-ink">幫 {hunter.name} 打個分數</Text>
-        <View className="rounded-3xl bg-white p-4" style={cardShadow}>
+        <View className="rounded-3xl bg-white p-4" style={shadowSoft}>
           <View className="flex-row items-center justify-center">
             {[1, 2, 3, 4, 5].map((n) => (
-              <Pressable key={n} onPress={() => setRating(n)} className="px-1.5">
+              <Pressable
+                key={n}
+                onPress={() => setRating(n)}
+                accessibilityRole="button"
+                accessibilityLabel={`給 ${n} 顆星`}
+                accessibilityState={{ selected: n <= rating }}
+                className="px-1.5"
+              >
                 <Ionicons name={n <= rating ? 'star' : 'star-outline'} size={36} color="#F5A623" />
               </Pressable>
             ))}
@@ -122,7 +124,14 @@ export default function ReviewScreen() {
             {PRAISE_TAGS.map((t) => {
               const on = tags.includes(t);
               return (
-                <Pressable key={t} onPress={() => toggleTag(t)} className="mb-2 mr-2">
+                <Pressable
+                  key={t}
+                  onPress={() => toggleTag(t)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: on }}
+                  accessibilityLabel={t}
+                  className="mb-2 mr-2"
+                >
                   <View
                     className={`rounded-full border px-3 py-1.5 ${
                       on ? 'border-sos bg-sos/10' : 'border-wood-200 bg-white'
@@ -137,7 +146,7 @@ export default function ReviewScreen() {
         </View>
 
         {/* 對方也給了你評價 */}
-        <View className="mt-4 flex-row items-center rounded-3xl bg-wood-50 px-4 py-3" style={cardShadow}>
+        <View className="mt-4 flex-row items-center rounded-3xl bg-wood-50 px-4 py-3" style={shadowSoft}>
           <View className="h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: hunter.avatarColor }}>
             <Text className="text-base font-black text-white">{hunter.name[0]}</Text>
           </View>
@@ -152,6 +161,8 @@ export default function ReviewScreen() {
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
         <Pressable
           onPress={() => router.replace('/')}
+          accessibilityRole="button"
+          accessibilityLabel="送出評價，完成"
           style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">

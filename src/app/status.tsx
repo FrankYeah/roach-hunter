@@ -5,15 +5,8 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { RankBadge } from '@/components/rank-badge';
+import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
-
-const cardShadow = {
-  shadowColor: '#2A2521',
-  shadowOpacity: 0.08,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 4 },
-  elevation: 3,
-};
 
 const STEPS = ['媒合成功', '獵人出發', '抵達現場', '任務完成'];
 const CURRENT_STEP = 1;
@@ -30,6 +23,8 @@ export default function StatusScreen() {
       <View className="flex-row items-center px-4 pb-2 pt-1">
         <Pressable
           onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="返回"
           className="h-10 w-10 items-center justify-center rounded-full bg-cream"
         >
           <Ionicons name="chevron-back" size={22} color="#2A2521" />
@@ -42,7 +37,7 @@ export default function StatusScreen() {
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
         {/* ETA 大字 */}
-        <View className="mt-2 items-center rounded-[28px] bg-sos/10 py-6" style={cardShadow}>
+        <View className="mt-2 items-center rounded-[28px] bg-sos/10 py-6" style={shadowSoft}>
           <Text className="text-xs font-semibold text-sos">預計抵達時間</Text>
           <View className="mt-1 flex-row items-end">
             <Text className="text-6xl font-black text-sos">{hunter.etaMin}</Text>
@@ -85,10 +80,10 @@ export default function StatusScreen() {
         </View>
 
         {/* 獵人卡片 */}
-        <View className="mt-6 flex-row items-center rounded-3xl bg-white p-4" style={cardShadow}>
+        <View className="mt-6 flex-row items-center rounded-3xl bg-white p-4" style={shadowSoft}>
           <View
             className="h-16 w-16 items-center justify-center rounded-full border-[3px] border-white"
-            style={{ backgroundColor: hunter.avatarColor, ...cardShadow }}
+            style={{ backgroundColor: hunter.avatarColor, ...shadowSoft }}
           >
             <FontAwesome5 name="shoe-prints" size={24} color="#FFFFFF" />
           </View>
@@ -109,7 +104,7 @@ export default function StatusScreen() {
 
         {/* 通訊 UI 框架 */}
         <Text className="mb-2 mt-6 text-base font-black text-ink">與獵人聯絡</Text>
-        <View className="rounded-3xl bg-cream p-3" style={cardShadow}>
+        <View className="rounded-3xl bg-cream p-3" style={shadowSoft}>
           {/* 對方訊息 */}
           <View className="mb-2 max-w-[80%] self-start rounded-2xl rounded-tl-md bg-white px-3 py-2">
             <Text className="text-sm text-ink">收到！我帶傢伙馬上到，先別激怒牠 👍</Text>
@@ -145,6 +140,8 @@ export default function StatusScreen() {
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
         <Pressable
           onPress={() => router.push('/review')}
+          accessibilityRole="button"
+          accessibilityLabel="獵人已解決，前往評價"
           style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-ink py-4">

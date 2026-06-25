@@ -6,23 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND } from '@/constants/brand';
+import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { CURRENT_USER, NEARBY_HUNTERS, type Hunter } from '@/data/hunters';
-
-const cardShadow = {
-  shadowColor: '#2A2521',
-  shadowOpacity: 0.1,
-  shadowRadius: 12,
-  shadowOffset: { width: 0, height: 6 },
-  elevation: 4,
-};
-
-const sosShadow = {
-  shadowColor: '#E2553A',
-  shadowOpacity: 0.45,
-  shadowRadius: 20,
-  shadowOffset: { width: 0, height: 10 },
-  elevation: 10,
-};
 
 /** 地圖上的「閒置獵人」標記，用腳丫子圖示代表 */
 function FootMarker({ hunter }: { hunter: Hunter }) {
@@ -38,14 +23,14 @@ function FootMarker({ hunter }: { hunter: Hunter }) {
     >
       <View
         className="h-12 w-12 items-center justify-center rounded-full border-[3px] border-white"
-        style={{ backgroundColor: hunter.avatarColor, ...cardShadow }}
+        style={{ backgroundColor: hunter.avatarColor, ...shadowSoft }}
       >
         <FontAwesome5 name="shoe-prints" size={18} color="#FFFFFF" />
       </View>
       {hunter.online && (
         <View className="absolute right-0 top-0 h-3.5 w-3.5 rounded-full border-2 border-white bg-leaf" />
       )}
-      <View className="mt-1 rounded-full bg-white px-2 py-0.5" style={cardShadow}>
+      <View className="mt-1 rounded-full bg-white px-2 py-0.5" style={shadowSoft}>
         <Text className="text-[10px] font-extrabold text-ink">{hunter.etaMin} 分</Text>
       </View>
     </View>
@@ -83,7 +68,7 @@ export default function HomeScreen() {
           <Text className="text-2xl font-black text-ink">{BRAND.appName}</Text>
           <Text className="mt-0.5 text-xs text-mute">{BRAND.tagline}</Text>
         </View>
-        <View className="flex-row items-center rounded-full bg-cream px-3 py-1.5" style={cardShadow}>
+        <View className="flex-row items-center rounded-full bg-cream px-3 py-1.5" style={shadowSoft}>
           <View className="h-7 w-7 items-center justify-center rounded-full bg-wood-300">
             <Ionicons name="home" size={14} color="#FFFFFF" />
           </View>
@@ -92,11 +77,11 @@ export default function HomeScreen() {
       </View>
 
       {/* 地圖 */}
-      <View className="mx-4 flex-1 overflow-hidden rounded-[28px] border border-wood-100 bg-cream" style={cardShadow}>
+      <View className="mx-4 flex-1 overflow-hidden rounded-[28px] border border-wood-100 bg-cream" style={shadowSoft}>
         <MapDecor />
 
         {/* 在線數量浮卡 */}
-        <View className="absolute left-4 top-4 flex-row items-center rounded-full bg-white px-3 py-2" style={cardShadow}>
+        <View className="absolute left-4 top-4 flex-row items-center rounded-full bg-white px-3 py-2" style={shadowSoft}>
           <View className="mr-2 h-2.5 w-2.5 rounded-full bg-leaf" />
           <Text className="text-sm font-bold text-ink">
             附近有 {onlineHunters.length} 位閒置獵人
@@ -113,7 +98,7 @@ export default function HomeScreen() {
           className="absolute items-center"
           style={{ left: '50%', top: '48%', transform: [{ translateX: -36 }, { translateY: -40 }] }}
         >
-          <View className="items-center justify-center rounded-2xl bg-white p-2" style={cardShadow}>
+          <View className="items-center justify-center rounded-2xl bg-white p-2" style={shadowSoft}>
             <MosaicTarget size={40} />
           </View>
           <View className="mt-1 flex-row items-center rounded-full bg-ink px-2.5 py-1">
@@ -134,8 +119,11 @@ export default function HomeScreen() {
 
         <Pressable
           onPress={() => router.push('/order')}
+          accessibilityRole="button"
+          accessibilityLabel={`${BRAND.sosLabel} 呼叫附近獵人`}
+          accessibilityHint="開啟呼救表單，選擇現場狀況與指導價"
           className="active:scale-[0.98]"
-          style={({ pressed }) => [sosShadow, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+          style={({ pressed }) => [shadowSos, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
         >
           <View className="flex-row items-center justify-center rounded-[28px] bg-sos py-5">
             <MosaicTarget size={30} color="#FFFFFF" vibrate />
