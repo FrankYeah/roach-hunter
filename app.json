@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "roach-hunter-tmp",
-    "slug": "roach-hunter-tmp",
+    "name": "乾有那個啦",
+    "slug": "roach-hunter",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "roachhuntertmp",
+    "scheme": "roachhunter",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
