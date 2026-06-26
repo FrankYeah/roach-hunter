@@ -9,6 +9,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { ADDONS, BRAND, CHASE_FEE, TARGET_TIERS, type TargetTier } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { CURRENT_USER } from '@/data/hunters';
+import { isValidLatLng } from '@/lib/geo';
 import { createOrder } from '@/lib/orders';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -83,13 +84,15 @@ export default function OrderScreen() {
   const confirm = async () => {
     if (submitting) return;
     setSubmitting(true);
+    // 定位無效（缺失 / (0,0) 哨兵值）就寫 null，避免污染 DB、讓獵人端算出極端距離
+    const coords = isValidLatLng(userLocation) ? userLocation : null;
     // 先真實寫入 Supabase（成功才進雷達頁，確保 orderId 已就緒）
     const { id, error } = await createOrder({
       clientId: userId,
       tierId,
       price: total,
-      lat: userLocation?.latitude ?? null,
-      lng: userLocation?.longitude ?? null,
+      lat: coords?.latitude ?? null,
+      lng: coords?.longitude ?? null,
     });
     setSubmitting(false);
     if (error) {

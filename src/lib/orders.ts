@@ -109,6 +109,16 @@ export async function completeOrderDb(orderId: string): Promise<void> {
 }
 
 /**
+ * 每個訂閱都用唯一的 channel topic。
+ * 原因：removeChannel() 是非同步的，若沿用固定 topic，當 effect 在
+ * dev 重複掛載 / 快速切換頁面時重新訂閱，supabase-js 會回傳那個「尚未
+ * 拆除完成、且已 subscribe()」的同名 channel，接著鏈上的 .on() 就會丟出
+ * "cannot add postgres_changes callbacks ... after subscribe()"。
+ * 唯一 topic 保證 .channel() 永遠回傳全新 channel，.on() 必在 subscribe() 前。
+ */
+let channelSeq = 0;
+
+/**
  * 訂閱單一訂單的狀態更新（求救端用）。
  * 回傳取消訂閱函式；未設定 Supabase 時為 no-op。
  */
@@ -116,7 +126,7 @@ export function subscribeOrder(orderId: string, onUpdate: (row: OrderRow) => voi
   if (!isSupabaseConfigured || !supabase) return () => {};
   const client = supabase;
   const channel = client
-    .channel(`order:${orderId}`)
+    .channel(`order:${orderId}:${++channelSeq}`)
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
@@ -136,7 +146,7 @@ export function subscribeOpenOrders(onChange: () => void): () => void {
   if (!isSupabaseConfigured || !supabase) return () => {};
   const client = supabase;
   const channel = client
-    .channel('orders:pool')
+    .channel(`orders:pool:${++channelSeq}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => onChange())
     .subscribe();
   return () => {

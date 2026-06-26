@@ -10,7 +10,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { TARGET_TIERS } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { PLATFORM_FEE_RATE, SOS_TASKS, netEarning, tierOf, type SosTask } from '@/data/tasks';
-import { distanceMeters } from '@/lib/geo';
+import { safeDistanceMeters } from '@/lib/geo';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
 import {
   acceptOrder,
@@ -40,10 +40,11 @@ function minutesSince(iso: string): number {
 function itemFromOrder(o: OrderRow, loc: LatLng | null): PoolItem {
   const tier = TARGET_TIERS.find((t) => t.id === tierIdFromSize(o.target_size))!;
   const price = o.price ?? tier.price;
-  const distanceM =
-    loc && o.location_lat != null && o.location_lng != null
-      ? distanceMeters(loc, { latitude: o.location_lat, longitude: o.location_lng })
-      : null;
+  // 防呆：任一端座標缺失或為 (0,0) 哨兵值時回 null → 顯示「距離計算中…」
+  const distanceM = safeDistanceMeters(loc, {
+    latitude: o.location_lat,
+    longitude: o.location_lng,
+  });
   return {
     id: o.id,
     label: tier.label,
@@ -83,7 +84,7 @@ function PoolCard({ item, busy, onAccept }: { item: PoolItem; busy: boolean; onA
             <View className="ml-2 flex-row items-center">
               <Ionicons name="navigate" size={12} color="#9A8F80" />
               <Text className="ml-0.5 text-xs text-mute">
-                {item.distanceM == null ? '—' : `${item.distanceM} m`}
+                {item.distanceM == null ? '距離計算中…' : `${item.distanceM} m`}
               </Text>
             </View>
             <Text className="ml-2 text-xs text-mute">· {item.agoMin} 分鐘前</Text>

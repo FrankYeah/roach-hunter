@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { TARGET_TIERS } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
-import { distanceMeters, etaMinFromMeters } from '@/lib/geo';
+import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
 import { completeOrderDb, tierIdFromSize } from '@/lib/orders';
 import { useAppStore } from '@/store/useAppStore';
@@ -34,18 +34,19 @@ export default function HunterTaskScreen() {
     : tierOf(mockTask);
   const price = acceptedOrder ? acceptedOrder.price ?? tier.price : tier.price;
   const net = netEarning(price);
+  // 防呆：座標無效（缺失 / (0,0)）→ null → 顯示「距離計算中…」、ETA 退回預設值
   const distanceM = acceptedOrder
-    ? userLocation && acceptedOrder.location_lat != null && acceptedOrder.location_lng != null
-      ? distanceMeters(userLocation, {
-          latitude: acceptedOrder.location_lat,
-          longitude: acceptedOrder.location_lng,
-        })
-      : null
+    ? safeDistanceMeters(userLocation, {
+        latitude: acceptedOrder.location_lat,
+        longitude: acceptedOrder.location_lng,
+      })
     : mockTask.distanceM;
-  const etaMin = acceptedOrder ? (distanceM != null ? etaMinFromMeters(distanceM) : 6) : mockTask.etaMin;
+  const etaMin = acceptedOrder ? (distanceM != null ? etaMinFromMeters(distanceM) : 10) : mockTask.etaMin;
   const address = acceptedOrder ? '地圖上的呼救位置' : mockTask.address;
 
-  const [secs, setSecs] = useState(etaMin * 60);
+  // 倒數秒數再夾一層：不合理（NaN / 負 / 超過 2 小時）一律退回 10:00
+  const initialSecs = Number.isFinite(etaMin) && etaMin > 0 && etaMin <= 120 ? etaMin * 60 : 600;
+  const [secs, setSecs] = useState(initialSecs);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -95,7 +96,7 @@ export default function HunterTaskScreen() {
             {arrived ? '00:00' : mmss(secs)}
           </Text>
           <Text className="mt-1 text-xs text-silver">
-            距離 {distanceM == null ? '—' : `${distanceM} m`}・這趟淨收益{' '}
+            距離 {distanceM == null ? '計算中…' : `${distanceM} m`}・這趟淨收益{' '}
             <Text className="font-bold text-leaf">${net}</Text>
           </Text>
         </View>
