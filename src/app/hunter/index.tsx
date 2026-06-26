@@ -95,16 +95,27 @@ export default function HunterPoolScreen() {
           </View>
           <Text className="mt-0.5 text-xs text-mute">附近有 {SOS_TASKS.length} 筆呼救等你出動・拖鞋見習生</Text>
         </View>
-        <Pressable
-          onPress={backToRequester}
-          accessibilityRole="button"
-          accessibilityLabel="切換為求救者身分"
-          className="flex-row items-center rounded-full bg-cream px-3 py-1.5"
-          style={shadowSoft}
-        >
-          <MaterialCommunityIcons name="swap-horizontal" size={16} color="#9A763C" />
-          <Text className="ml-1 text-xs font-bold text-ink">求救者</Text>
-        </Pressable>
+        <View className="flex-row items-center">
+          <Pressable
+            onPress={() => router.push('/hunter/profile')}
+            accessibilityRole="button"
+            accessibilityLabel="個人設定與實名認證"
+            className="mr-2 h-9 w-9 items-center justify-center rounded-full bg-cream"
+            style={shadowSoft}
+          >
+            <Ionicons name="person-circle-outline" size={20} color="#9A763C" />
+          </Pressable>
+          <Pressable
+            onPress={backToRequester}
+            accessibilityRole="button"
+            accessibilityLabel="切換為求救者身分"
+            className="flex-row items-center rounded-full bg-cream px-3 py-1.5"
+            style={shadowSoft}
+          >
+            <MaterialCommunityIcons name="swap-horizontal" size={16} color="#9A763C" />
+            <Text className="ml-1 text-xs font-bold text-ink">求救者</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>

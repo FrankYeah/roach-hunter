@@ -33,6 +33,16 @@ interface AppState {
   acceptedTaskId: string | null;
   acceptTask: (taskId: string) => void;
   finishTask: () => void;
+
+  // ── 帳號 / 登入 ────────────────────────────
+  isAuthenticated: boolean;
+  phone: string | null;
+  login: (phone: string) => void;
+  logout: () => void;
+
+  // ── 獵人實名認證 ───────────────────────────
+  verification: { idFront: boolean; idBack: boolean; police: boolean };
+  setVerificationDoc: (key: 'idFront' | 'idBack' | 'police', value: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -50,4 +60,13 @@ export const useAppStore = create<AppState>((set) => ({
   acceptedTaskId: null,
   acceptTask: (taskId) => set({ acceptedTaskId: taskId }),
   finishTask: () => set({ acceptedTaskId: null }),
+
+  isAuthenticated: false,
+  phone: null,
+  login: (phone) => set({ isAuthenticated: true, phone }),
+  logout: () => set({ isAuthenticated: false, phone: null }),
+
+  verification: { idFront: false, idBack: false, police: false },
+  setVerificationDoc: (key, value) =>
+    set((s) => ({ verification: { ...s.verification, [key]: value } })),
 }));

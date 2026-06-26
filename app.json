@@ -34,6 +34,12 @@
             "imageWidth": 76
           }
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "「乾，出現了！」需要你的位置，才能在地圖上顯示你家與附近的獵人。"
+        }
       ]
     ],
     "experiments": {
