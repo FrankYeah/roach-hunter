@@ -7,6 +7,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
 import { successHaptic } from '@/lib/haptics';
+import { subscribeOrder } from '@/lib/orders';
 import { useAppStore } from '@/store/useAppStore';
 
 const RADAR = 280;
@@ -45,6 +46,7 @@ function PulseRing({ delay }: { delay: number }) {
 export default function MatchingScreen() {
   const confirmMatched = useAppStore((s) => s.confirmMatched);
   const resetOrder = useAppStore((s) => s.resetOrder);
+  const orderId = useAppStore((s) => s.orderId);
 
   const spin = useRef(new Animated.Value(0)).current;
   const onlineCount = NEARBY_HUNTERS.filter((h) => h.online).length;
@@ -73,6 +75,18 @@ export default function MatchingScreen() {
     }, MATCH_DELAY_MS);
     return () => clearTimeout(timer);
   }, [confirmMatched]);
+
+  // Supabase Realtime：後端把訂單標記為 matched 時立即導向（與上面 3 秒 mock 並存）
+  useEffect(() => {
+    if (!orderId) return;
+    return subscribeOrder(orderId, (row) => {
+      if (row.status === 'matched') {
+        successHaptic();
+        confirmMatched(row.hunter_id ?? NEARBY_HUNTERS[0].id);
+        router.replace('/status');
+      }
+    });
+  }, [orderId, confirmMatched]);
 
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 

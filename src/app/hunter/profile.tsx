@@ -7,6 +7,7 @@ import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { shadowSoft } from '@/constants/shadows';
+import { signOut } from '@/lib/auth';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -69,7 +70,6 @@ function UploadRow({
 export default function HunterProfileScreen() {
   const verification = useAppStore((s) => s.verification);
   const setVerificationDoc = useAppStore((s) => s.setVerificationDoc);
-  const logout = useAppStore((s) => s.logout);
 
   const verified = verification.idFront && verification.idBack;
 
@@ -202,7 +202,7 @@ export default function HunterProfileScreen() {
 
         {/* 登出 */}
         <Pressable
-          onPress={logout}
+          onPress={() => signOut()}
           accessibilityRole="button"
           accessibilityLabel="登出"
           className="mt-8"

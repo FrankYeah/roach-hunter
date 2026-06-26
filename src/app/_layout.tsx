@@ -2,18 +2,53 @@ import '@/global.css';
 
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
 export default function RootLayout() {
   const isAuthenticated = useAppStore((s) => s.isAuthenticated);
+  const authReady = useAppStore((s) => s.authReady);
+  const applySession = useAppStore((s) => s.applySession);
+  const setAuthReady = useAppStore((s) => s.setAuthReady);
+
+  // 冷啟動：還原 Supabase session（未設定 Supabase 則直接就緒，走 mock）
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setAuthReady(true);
+      return;
+    }
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      applySession(data.session);
+      setAuthReady(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      applySession(session);
+    });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [applySession, setAuthReady]);
+
+  // 還在還原 session 時顯示簡單 splash，避免閃一下登入頁
+  if (!authReady) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' }}>
+        <ActivityIndicator color="#FB6B4B" />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      {/* 宣告式登入守衛：未登入只開放 /login，登入後開放其餘畫面。
-          由 expo-router 在導覽器就緒後自動切換，避免命令式導航的時序錯誤。 */}
+      {/* 宣告式登入守衛：未登入只開放 /login，登入後開放其餘畫面 */}
       <Stack
         screenOptions={{
           headerShown: false,

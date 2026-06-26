@@ -71,6 +71,7 @@ export default function HomeScreen() {
   const nearestEta = Math.min(...onlineHunters.map((h) => h.etaMin));
   const toggleRole = useAppStore((s) => s.toggleRole);
   const isAuthenticated = useAppStore((s) => s.isAuthenticated);
+  const setUserLocation = useAppStore((s) => s.setUserLocation);
 
   const [center, setCenter] = useState<LatLng | null>(null);
   const [markers, setMarkers] = useState<PlacedHunter[]>([]);
@@ -94,11 +95,12 @@ export default function HomeScreen() {
       if (cancelled) return;
       setCenter(c);
       setMarkers(scatter(c));
+      setUserLocation(c); // 供建立訂單寫入 lat/lng
     })();
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, setUserLocation]);
 
   // 自訂 Marker：先 track 讓圖示渲染出來，1.5s 後凍結以省效能
   useEffect(() => {

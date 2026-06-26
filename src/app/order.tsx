@@ -9,6 +9,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { ADDONS, BRAND, CHASE_FEE, TARGET_TIERS, type TargetTier } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { CURRENT_USER } from '@/data/hunters';
+import { createOrder } from '@/lib/orders';
 import { useAppStore } from '@/store/useAppStore';
 
 /** 現場狀況選項卡 */
@@ -74,9 +75,22 @@ export default function OrderScreen() {
     setAddonIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const startMatching = useAppStore((s) => s.startMatching);
-  const confirm = () => {
+  const setOrderId = useAppStore((s) => s.setOrderId);
+  const userId = useAppStore((s) => s.userId);
+  const userLocation = useAppStore((s) => s.userLocation);
+
+  const confirm = async () => {
     startMatching({ tierId, addonIds, total });
     router.push('/matching');
+    // 寫入 Supabase（未設定則略過，不影響本地流程）
+    const { id } = await createOrder({
+      clientId: userId,
+      tierId,
+      price: total,
+      lat: userLocation?.latitude ?? null,
+      lng: userLocation?.longitude ?? null,
+    });
+    if (id) setOrderId(id);
   };
 
   return (
