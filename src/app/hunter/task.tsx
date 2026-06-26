@@ -10,7 +10,7 @@ import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
-import { completeOrderDb, tierIdFromSize } from '@/lib/orders';
+import { completeOrderDb, fetchOrder, tierIdFromSize, type OrderRow } from '@/lib/orders';
 import { bumpCompletedTasks, fetchProfile, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -44,7 +44,20 @@ export default function HunterTaskScreen() {
       })
     : mockTask.distanceM;
   const etaMin = acceptedOrder ? (distanceM != null ? etaMinFromMeters(distanceM) : 10) : mockTask.etaMin;
-  const address = acceptedOrder ? '地圖上的呼救位置' : mockTask.address;
+
+  // 接單後才解鎖：用 fetchOrder 取回完整列（含精確地址與進入指引）
+  const [detail, setDetail] = useState<OrderRow | null>(null);
+  useEffect(() => {
+    if (!acceptedOrder?.id) return;
+    let active = true;
+    fetchOrder(acceptedOrder.id).then((o) => active && o && setDetail(o));
+    return () => {
+      active = false;
+    };
+  }, [acceptedOrder?.id]);
+
+  const address = acceptedOrder ? detail?.exact_address ?? '解鎖地址中…' : mockTask.address;
+  const entryInstructions = detail?.entry_instructions ?? null;
 
   // 讀取對方（鎮宅金主）的真實 profile
   const [client, setClient] = useState<Profile | null>(null);
@@ -139,6 +152,24 @@ export default function HunterTaskScreen() {
             <Text className="text-[11px] text-mute">目標</Text>
             <Text className="text-sm font-black text-ink">{tier.hint}</Text>
           </View>
+        </View>
+
+        {/* 接單後解鎖：精確地址 + 進入指引 */}
+        <View className="mt-4 rounded-3xl bg-leaf/10 p-4" style={shadowSoft}>
+          <View className="flex-row items-center">
+            <Ionicons name="lock-open" size={14} color="#7FB069" />
+            <Text className="ml-1.5 text-xs font-bold text-leaf">已解鎖・精確地址</Text>
+          </View>
+          <Text className="mt-1.5 text-base font-black text-ink">{address}</Text>
+          {entryInstructions ? (
+            <View className="mt-3 flex-row items-start rounded-2xl bg-white px-3 py-2.5">
+              <Ionicons name="enter-outline" size={16} color="#9A763C" />
+              <View className="ml-2 flex-1">
+                <Text className="text-[11px] text-mute">進入指引</Text>
+                <Text className="mt-0.5 text-sm text-ink">{entryInstructions}</Text>
+              </View>
+            </View>
+          ) : null}
         </View>
 
         {/* 與求救者對話 */}

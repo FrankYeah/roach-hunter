@@ -83,9 +83,10 @@ export default function HunterProfileScreen() {
 
   const verified = verification.idFront && verification.idBack;
 
-  // 讀取自己的 profile：回填等級、性別、與「跨裝置保留」的認證狀態
+  // 讀取自己的 profile：回填等級、性別、接單半徑、與「跨裝置保留」的認證狀態
   const [profile, setProfile] = useState<Profile | null>(null);
   const [gender, setGender] = useState<Gender>('unspecified');
+  const [radius, setRadius] = useState(2);
   useEffect(() => {
     if (!userId) return;
     let active = true;
@@ -93,6 +94,7 @@ export default function HunterProfileScreen() {
       if (!active || !p) return;
       setProfile(p);
       setGender(p.gender);
+      setRadius(p.search_radius_km);
       if (p.id_verified) {
         setVerificationDoc('idFront', true);
         setVerificationDoc('idBack', true);
@@ -105,11 +107,19 @@ export default function HunterProfileScreen() {
   }, [userId, setVerificationDoc]);
 
   const level = levelFromCompleted(profile?.completed_tasks ?? 0);
+  const isMaster = level.id === 'master'; // 拖鞋仙人才解鎖自訂接單範圍
 
   const chooseGender = (g: Gender) => {
     selectHaptic();
     setGender(g);
     updateProfile(userId, { gender: g });
+  };
+
+  const chooseRadius = (km: number) => {
+    if (!isMaster) return;
+    selectHaptic();
+    setRadius(km);
+    updateProfile(userId, { search_radius_km: km });
   };
 
   // 白金徽章彈入動畫
@@ -208,6 +218,57 @@ export default function HunterProfileScreen() {
             );
           })}
         </View>
+
+        {/* 接單範圍（拖鞋仙人專屬特權）*/}
+        <View className="mb-2 mt-6 flex-row items-center">
+          <MaterialCommunityIcons name="map-marker-radius-outline" size={18} color="#2A2521" />
+          <Text className="ml-2 text-base font-black text-ink">接單範圍</Text>
+          {!isMaster && (
+            <View className="ml-2 flex-row items-center rounded-full bg-silver-light px-2 py-0.5">
+              <MaterialCommunityIcons name="lock" size={10} color="#969DA9" />
+              <Text className="ml-1 text-[10px] font-bold text-silver-dark">拖鞋仙人解鎖</Text>
+            </View>
+          )}
+        </View>
+
+        {isMaster ? (
+          <>
+            <View className="flex-row">
+              {[1, 2, 3, 4, 5].map((km) => {
+                const on = radius === km;
+                return (
+                  <Pressable
+                    key={km}
+                    onPress={() => chooseRadius(km)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`接單半徑 ${km} 公里`}
+                    className="mr-2"
+                  >
+                    <View
+                      className={`h-12 w-12 items-center justify-center rounded-2xl border-2 ${
+                        on ? 'border-silver-dark bg-silver-light' : 'border-wood-100 bg-white'
+                      }`}
+                    >
+                      <Text className={`text-base font-black ${on ? 'text-silver-dark' : 'text-ink'}`}>{km}</Text>
+                      <Text className={`text-[9px] ${on ? 'text-silver-dark' : 'text-mute'}`}>km</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text className="mt-2 text-xs text-mute">
+              任務池只抓取你 <Text className="font-bold text-ink">{radius} 公里</Text> 內的呼救
+            </Text>
+          </>
+        ) : (
+          <View className="flex-row items-center rounded-2xl border border-wood-200 bg-wood-50 px-4 py-3">
+            <MaterialCommunityIcons name="crown-outline" size={18} color="#9A763C" />
+            <Text className="ml-2 flex-1 text-xs leading-5 text-wood-600">
+              升上「拖鞋仙人」（累積 20 趟任務）即可自訂 1～5 公里接單範圍。目前固定 {radius} 公里。
+            </Text>
+          </View>
+        )}
 
         {/* 白金安全徽章（認證完成才出現）*/}
         {verified && (

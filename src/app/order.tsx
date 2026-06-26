@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
@@ -88,6 +88,8 @@ export default function OrderScreen() {
   const [addonIds, setAddonIds] = useState<string[]>([]);
   const [genderPref, setGenderPref] = useState<GenderPref>('any');
   const [levelId, setLevelId] = useState<HunterLevelId>('rookie');
+  const [exactAddress, setExactAddress] = useState('');
+  const [entryInstructions, setEntryInstructions] = useState('');
 
   const tier = TARGET_TIERS.find((t) => t.id === tierId)!;
   const level = HUNTER_LEVELS.find((l) => l.id === levelId)!;
@@ -104,8 +106,15 @@ export default function OrderScreen() {
   const userLocation = useAppStore((s) => s.userLocation);
   const [submitting, setSubmitting] = useState(false);
 
+  const canSubmit = exactAddress.trim().length > 0;
+
   const confirm = async () => {
     if (submitting) return;
+    // 強制填寫精確地址，獵人才能順利找到
+    if (!canSubmit) {
+      Alert.alert('還差一步', '請先填寫精確門牌地址（媒合成功前不會公開給任何獵人）');
+      return;
+    }
     setSubmitting(true);
     // 定位無效（缺失 / (0,0) 哨兵值）就寫 null，避免污染 DB、讓獵人端算出極端距離
     const coords = isValidLatLng(userLocation) ? userLocation : null;
@@ -118,6 +127,8 @@ export default function OrderScreen() {
       lng: coords?.longitude ?? null,
       genderPref,
       minCompleted: level.minCompleted,
+      exactAddress: exactAddress.trim(),
+      entryInstructions: entryInstructions.trim() || null,
     });
     setSubmitting(false);
     if (error) {
@@ -154,10 +165,45 @@ export default function OrderScreen() {
             <Ionicons name="location" size={18} color="#FFFFFF" />
           </View>
           <View className="ml-3 flex-1">
-            <Text className="text-[11px] text-mute">救援地點</Text>
+            <Text className="text-[11px] text-mute">概略定位（GPS）</Text>
             <Text className="text-sm font-bold text-ink">{CURRENT_USER.address}</Text>
           </View>
-          <Text className="text-xs font-semibold text-sos">變更</Text>
+          <View className="flex-row items-center">
+            <Ionicons name="navigate-circle" size={14} color="#7FB069" />
+            <Text className="ml-1 text-xs font-semibold text-leaf">已定位</Text>
+          </View>
+        </View>
+
+        {/* 精確地址（必填）+ 進入指引（選填）*/}
+        <Text className="mb-2 text-base font-black text-ink">確認精確地址</Text>
+        <View className="mb-2.5 rounded-2xl border-2 border-wood-100 bg-white px-4 py-3" style={shadowSoft}>
+          <Text className="text-[11px] text-mute">門牌・樓層（必填，獵人接單後才看得到）</Text>
+          <TextInput
+            value={exactAddress}
+            onChangeText={setExactAddress}
+            placeholder="例如：夏日路 100 號 3 樓"
+            placeholderTextColor="#C4BCB0"
+            accessibilityLabel="精確門牌地址，必填"
+            className="mt-1 text-base font-bold text-ink"
+          />
+        </View>
+        <View className="mb-2.5 rounded-2xl border border-wood-100 bg-white px-4 py-3">
+          <Text className="text-[11px] text-mute">進入指引（選填，給警衛 / 大門）</Text>
+          <TextInput
+            value={entryInstructions}
+            onChangeText={setEntryInstructions}
+            placeholder="例如：按 3 樓電鈴，或跟管理員說找王小姐"
+            placeholderTextColor="#C4BCB0"
+            accessibilityLabel="進入指引，選填"
+            multiline
+            className="mt-1 text-sm text-ink"
+          />
+        </View>
+        <View className="mb-6 flex-row items-center rounded-xl bg-leaf/10 px-3 py-2">
+          <Ionicons name="lock-closed" size={13} color="#7FB069" />
+          <Text className="ml-1.5 flex-1 text-[11px] text-leaf">
+            隱私保護：媒合成功前，精確地址不會公開給任何獵人
+          </Text>
         </View>
 
         {/* 現場狀況 */}
@@ -293,18 +339,18 @@ export default function OrderScreen() {
         </View>
         <Pressable
           onPress={confirm}
-          disabled={submitting}
+          disabled={submitting || !canSubmit}
           accessibilityRole="button"
           accessibilityLabel={`確認呼救，指導價 ${total} 元起，開始媒合獵人`}
           style={({ pressed }) => [
             shadowSos,
-            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: submitting ? 0.6 : 1 },
+            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: submitting || !canSubmit ? 0.5 : 1 },
           ]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
-            <Ionicons name="flash" size={20} color="#FFFFFF" />
+            <Ionicons name={canSubmit ? 'flash' : 'create-outline'} size={20} color="#FFFFFF" />
             <Text className="ml-2 text-lg font-black text-white">
-              {submitting ? '送出中…' : '確認呼救・開始媒合'}
+              {submitting ? '送出中…' : canSubmit ? '確認呼救・開始媒合' : '請先填寫精確地址'}
             </Text>
           </View>
         </Pressable>

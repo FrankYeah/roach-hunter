@@ -1,6 +1,6 @@
 /**
  * 「乾，有那個啦」品牌用語與規格常數
- * 嚴格遵守視覺避諱：全程不出現任何蟲體字眼，一律以「那個 / 目標 / 訪客」代稱。
+ * 嚴格遵守視覺避諱：全程不出現任何寫實字眼，一律以「那個 / 目標 / 訪客」代稱。
  */
 
 export const BRAND = {
@@ -21,7 +21,7 @@ export type HunterRank = (typeof HUNTER_RANKS)[number];
  *  1) 求救端「獵人等級要求」的動態加價
  *  2) 獵人首頁的等級面板 / 升級進度
  *  3) 任務池派單過濾（completed_tasks >= 訂單 min_completed 才看得到）
- * 徽章質感隨等級提升，最高級「滅蟑大師」採金屬銀。
+ * 徽章質感隨等級提升，最高級「拖鞋仙人」採金屬銀。
  */
 export type HunterLevelId = 'rookie' | 'skilled' | 'veteran' | 'master';
 
@@ -39,10 +39,10 @@ export interface HunterLevel {
 }
 
 export const HUNTER_LEVELS: HunterLevel[] = [
-  { id: 'rookie', name: '新手', minCompleted: 0, surcharge: 0, badge: 'bg-wood-100', text: 'text-wood-600', icon: 'shoe-sneaker' },
-  { id: 'skilled', name: '熟手', minCompleted: 1, surcharge: 30, badge: 'bg-wood-300', text: 'text-ink', icon: 'shoe-print' },
-  { id: 'veteran', name: '老手', minCompleted: 5, surcharge: 50, badge: 'bg-silver-light', text: 'text-silver-dark', icon: 'medal-outline' },
-  { id: 'master', name: '滅蟑大師', minCompleted: 20, surcharge: 70, badge: 'bg-silver', text: 'text-white', icon: 'crown' },
+  { id: 'rookie', name: '拖鞋見習生', minCompleted: 0, surcharge: 0, badge: 'bg-wood-100', text: 'text-wood-600', icon: 'shoe-sneaker' },
+  { id: 'skilled', name: '捲報紙武士', minCompleted: 1, surcharge: 30, badge: 'bg-wood-300', text: 'text-ink', icon: 'shoe-print' },
+  { id: 'veteran', name: '物理超渡師', minCompleted: 5, surcharge: 50, badge: 'bg-silver-light', text: 'text-silver-dark', icon: 'medal-outline' },
+  { id: 'master', name: '拖鞋仙人', minCompleted: 20, surcharge: 70, badge: 'bg-silver', text: 'text-white', icon: 'crown' },
 ];
 
 /** 由完成任務數推導目前等級（取符合的最高門檻）*/
@@ -61,7 +61,7 @@ export function nextLevel(completed: number): HunterLevel | null {
 export interface TargetTier {
   id: 'small' | 'big' | 'flying';
   label: string;
-  /** 用「方塊大小」隱喻體型，避免任何蟲體描述 */
+  /** 用「方塊大小」隱喻體型，避免任何寫實描述 */
   hint: string;
   price: number;
   /** 馬賽克方塊的格數，視覺上越大越多格 */

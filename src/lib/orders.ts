@@ -22,11 +22,23 @@ export interface OrderRow {
   /** 求救者的進階篩選條件 */
   gender_pref: GenderPref;
   min_completed: number;
+  /** 精確門牌 / 樓層（隱私：媒合成功前不對外揭露）*/
+  exact_address: string | null;
+  /** 進入指引（給警衛 / 大門，選填）*/
+  entry_instructions: string | null;
   created_at: string;
 }
 
 /** 性別偏好：不拘 / 限男性 / 限女性 */
 export type GenderPref = 'any' | 'male' | 'female';
+
+/**
+ * 任務池對外（status=searching）只揭露的安全欄位 —— 不含精確地址 / 進入指引。
+ * 隱私保護：獵人接單前看不到真實地址，接單後才用 fetchOrder 取完整列。
+ */
+export type OpenOrderRow = Omit<OrderRow, 'exact_address' | 'entry_instructions'>;
+const OPEN_ORDER_COLS =
+  'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, created_at';
 
 /** tier id → DB target_size 短碼（對應 SQL 的 CHECK 限制）*/
 const TARGET_SIZE: Record<TargetTier['id'], OrderRow['target_size']> = {
@@ -48,6 +60,8 @@ export interface CreateOrderInput {
   lng: number | null;
   genderPref: GenderPref;
   minCompleted: number;
+  exactAddress: string;
+  entryInstructions: string | null;
 }
 
 /** 建立呼救訂單並寫入 Supabase。未設定 Supabase 時回傳 null（mock 後備）。*/
@@ -66,6 +80,8 @@ export async function createOrder(
       price: input.price,
       gender_pref: input.genderPref,
       min_completed: input.minCompleted,
+      exact_address: input.exactAddress,
+      entry_instructions: input.entryInstructions,
     })
     .select('id')
     .single();
@@ -79,15 +95,18 @@ export async function fetchOrder(orderId: string): Promise<OrderRow | null> {
   return (data as OrderRow | null) ?? null;
 }
 
-/** 任務池：讀取所有 searching 中的訂單（新到舊）*/
-export async function fetchOpenOrders(): Promise<OrderRow[]> {
+/**
+ * 任務池：讀取所有 searching 中的訂單（新到舊）。
+ * 隱私保護：只 select 安全欄位，精確地址 / 進入指引不進前端。
+ */
+export async function fetchOpenOrders(): Promise<OpenOrderRow[]> {
   if (!isSupabaseConfigured || !supabase) return [];
   const { data } = await supabase
     .from('orders')
-    .select('*')
+    .select(OPEN_ORDER_COLS)
     .eq('status', 'searching')
     .order('created_at', { ascending: false });
-  return (data as OrderRow[] | null) ?? [];
+  return (data as OpenOrderRow[] | null) ?? [];
 }
 
 /**

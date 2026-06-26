@@ -13,6 +13,8 @@ export interface Profile {
   gender: Gender;
   id_verified: boolean;
   police_verified: boolean;
+  /** 獵人自訂接單半徑（公里）。高階特權，預設 2。*/
+  search_radius_km: number;
 }
 
 /** 兩種身分的預設名稱（也用來判斷名稱是否「仍是未自訂的預設值」）*/
@@ -32,6 +34,7 @@ function mapRow(data: {
   gender?: Gender | null;
   id_verified?: boolean | null;
   police_verified?: boolean | null;
+  search_radius_km?: number | string | null;
 }): Profile {
   return {
     id: data.id,
@@ -42,6 +45,7 @@ function mapRow(data: {
     gender: data.gender ?? 'unspecified',
     id_verified: data.id_verified ?? false,
     police_verified: data.police_verified ?? false,
+    search_radius_km: data.search_radius_km != null ? Number(data.search_radius_km) : 2,
   };
 }
 
@@ -75,16 +79,20 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
   if (!isSupabaseConfigured || !supabase || !userId) return null;
   const { data } = await supabase
     .from('profiles')
-    .select('id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified')
+    .select(
+      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km',
+    )
     .eq('id', userId)
     .maybeSingle();
   return data ? mapRow(data) : null;
 }
 
-/** 更新自己的 profile（性別 / 認證狀態等）。未設定或欄位未遷移時靜默忽略。*/
+/** 更新自己的 profile（性別 / 認證狀態 / 接單半徑等）。未設定或欄位未遷移時靜默忽略。*/
 export async function updateProfile(
   userId: string | null,
-  patch: Partial<Pick<Profile, 'display_name' | 'gender' | 'id_verified' | 'police_verified'>>,
+  patch: Partial<
+    Pick<Profile, 'display_name' | 'gender' | 'id_verified' | 'police_verified' | 'search_radius_km'>
+  >,
 ): Promise<void> {
   if (!isSupabaseConfigured || !supabase || !userId) return;
   await supabase.from('profiles').update(patch).eq('id', userId);

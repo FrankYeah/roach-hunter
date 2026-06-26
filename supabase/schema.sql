@@ -17,6 +17,9 @@ create table if not exists public.orders (
   -- 求救者的進階篩選：性別偏好 + 最低經驗（completed_tasks）要求
   gender_pref   text not null default 'any' check (gender_pref in ('any', 'male', 'female')),
   min_completed integer not null default 0,
+  -- 精確地址 / 進入指引（隱私：媒合成功前不揭露給其他獵人）
+  exact_address       text,
+  entry_instructions  text,
   created_at    timestamptz not null default now()
 );
 
@@ -79,6 +82,8 @@ create table if not exists public.profiles (
   gender          text not null default 'unspecified' check (gender in ('male', 'female', 'unspecified')),
   id_verified     boolean not null default false,
   police_verified boolean not null default false,
+  -- 第八階段：獵人自訂接單半徑（公里），高階特權，預設 2
+  search_radius_km integer not null default 2,
   updated_at      timestamptz not null default now()
 );
 
@@ -122,3 +127,14 @@ alter table public.profiles add constraint profiles_gender_check
   check (gender in ('male', 'female', 'unspecified'));
 alter table public.profiles add column if not exists id_verified boolean not null default false;
 alter table public.profiles add column if not exists police_verified boolean not null default false;
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第八階段：精確地址 / 隱私 + 獵人自訂接單半徑（idempotent）       ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+-- orders：精確地址 + 進入指引
+alter table public.orders add column if not exists exact_address text;
+alter table public.orders add column if not exists entry_instructions text;
+
+-- profiles：獵人自訂接單半徑（公里），預設 2
+alter table public.profiles add column if not exists search_radius_km integer not null default 2;

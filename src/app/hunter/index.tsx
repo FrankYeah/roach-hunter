@@ -18,7 +18,7 @@ import {
   fetchOpenOrders,
   subscribeOpenOrders,
   tierIdFromSize,
-  type OrderRow,
+  type OpenOrderRow,
 } from '@/lib/orders';
 import { ensureProfile, fetchProfile, type Profile } from '@/lib/profiles';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -42,7 +42,7 @@ function minutesSince(iso: string): number {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
 }
 
-function itemFromOrder(o: OrderRow, loc: LatLng | null): PoolItem {
+function itemFromOrder(o: OpenOrderRow, loc: LatLng | null): PoolItem {
   const tier = TARGET_TIERS.find((t) => t.id === tierIdFromSize(o.target_size))!;
   const price = o.price ?? tier.price;
   // 防呆：任一端座標缺失或為 (0,0) 哨兵值時回 null → 顯示「距離計算中…」
@@ -97,6 +97,10 @@ function PoolCard({ item, busy, onAccept }: { item: PoolItem; busy: boolean; onA
           <Text className="mt-0.5 text-sm text-mute" numberOfLines={1}>
             {item.hint}
           </Text>
+          <View className="mt-1 flex-row items-center">
+            <Ionicons name="lock-closed" size={10} color="#C4BCB0" />
+            <Text className="ml-1 text-[11px] text-mute">接單後解鎖完整地址與進入指引</Text>
+          </View>
         </View>
       </View>
 
@@ -137,7 +141,7 @@ export default function HunterPoolScreen() {
   const userId = useAppStore((s) => s.userId);
   const userLocation = useAppStore((s) => s.userLocation);
 
-  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [orders, setOrders] = useState<OpenOrderRow[]>([]);
   const [loading, setLoading] = useState(configured);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
@@ -179,6 +183,7 @@ export default function HunterPoolScreen() {
   const myLevel = levelFromCompleted(myCompleted);
   const myGender = myProfile?.gender ?? 'unspecified';
   const fullyVerified = !!myProfile?.id_verified && !!myProfile?.police_verified;
+  const searchRadiusKm = myProfile?.search_radius_km ?? 2; // 拖鞋仙人可自訂，其餘預設 2km
   const next = nextLevel(myCompleted);
   const toNext = next ? Math.max(0, next.minCompleted - myCompleted) : 0;
   const levelProgress = next
@@ -192,9 +197,15 @@ export default function HunterPoolScreen() {
         if ((o.min_completed ?? 0) > myCompleted) return false; // 等級不足
         const pref = o.gender_pref ?? 'any';
         if (pref !== 'any' && pref !== myGender) return false; // 性別不符
+        // 接單半徑：距離算得出來且超過半徑才排除（算不出來時不過濾，避免誤殺）
+        const d = safeDistanceMeters(userLocation, {
+          latitude: o.location_lat,
+          longitude: o.location_lng,
+        });
+        if (d != null && d > searchRadiusKm * 1000) return false;
         return true;
       }),
-    [orders, myCompleted, myGender],
+    [orders, myCompleted, myGender, userLocation, searchRadiusKm],
   );
 
   // ── 優先派單：未完整認證者，未指定等級的單延遲 3 秒才顯示 ──
@@ -225,7 +236,7 @@ export default function HunterPoolScreen() {
     router.replace('/');
   };
 
-  const acceptReal = async (order: OrderRow) => {
+  const acceptReal = async (order: OpenOrderRow) => {
     if (acceptingId) return;
     setAcceptingId(order.id);
     const { ok, error } = await acceptOrder(order.id, userId ?? '', userLocation);
@@ -240,7 +251,14 @@ export default function HunterPoolScreen() {
       return;
     }
     successHaptic();
-    setAcceptedOrder({ ...order, status: 'matched', hunter_id: userId ?? null });
+    // 接單成功才解鎖隱私欄位：先帶安全欄位過去，task 頁再用 fetchOrder 取回精確地址
+    setAcceptedOrder({
+      ...order,
+      status: 'matched',
+      hunter_id: userId ?? null,
+      exact_address: null,
+      entry_instructions: null,
+    });
     router.push('/hunter/task');
   };
 
@@ -329,7 +347,7 @@ export default function HunterPoolScreen() {
             ) : (
               <View className="mt-3 flex-row items-center">
                 <MaterialCommunityIcons name="crown" size={14} color="#969DA9" />
-                <Text className="ml-1 text-[11px] font-bold text-silver-dark">已達最高等級・滅蟑大師</Text>
+                <Text className="ml-1 text-[11px] font-bold text-silver-dark">已達最高等級・{myLevel.name}</Text>
               </View>
             )}
           </View>
