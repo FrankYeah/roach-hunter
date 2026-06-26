@@ -1,5 +1,4 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,8 +27,7 @@ export default function LoginScreen() {
 
   const submit = () => {
     successHaptic();
-    login(`+886 ${phone}`);
-    router.replace('/'); // gate 也會處理，這裡保險導向首頁
+    login(`+886 ${phone}`); // 登入後由 Stack.Protected 自動切到首頁
   };
 
   const onOtpChange = (t: string) => {

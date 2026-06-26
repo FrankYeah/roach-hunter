@@ -202,10 +202,7 @@ export default function HunterProfileScreen() {
 
         {/* 登出 */}
         <Pressable
-          onPress={() => {
-            logout();
-            router.replace('/login');
-          }}
+          onPress={logout}
           accessibilityRole="button"
           accessibilityLabel="登出"
           className="mt-8"
