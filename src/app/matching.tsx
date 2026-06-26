@@ -7,7 +7,8 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
 import { successHaptic } from '@/lib/haptics';
-import { subscribeOrder } from '@/lib/orders';
+import { cancelOrder, subscribeOrder } from '@/lib/orders';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
 const RADAR = 280;
@@ -65,8 +66,9 @@ export default function MatchingScreen() {
     return () => loop.stop();
   }, [spin]);
 
-  // 模擬等待 3 秒 → 媒合成功 → 自動導向狀態頁
+  // 僅 mock 模式：等 3 秒自動媒合（真實模式改靠下方 Realtime）
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     const matched = NEARBY_HUNTERS[0];
     const timer = setTimeout(() => {
       successHaptic();
@@ -76,13 +78,13 @@ export default function MatchingScreen() {
     return () => clearTimeout(timer);
   }, [confirmMatched]);
 
-  // Supabase Realtime：後端把訂單標記為 matched 時立即導向（與上面 3 秒 mock 並存）
+  // Supabase Realtime：訂單被更新為 matched 且有 hunter_id 時，自動進狀態頁
   useEffect(() => {
     if (!orderId) return;
     return subscribeOrder(orderId, (row) => {
-      if (row.status === 'matched') {
+      if (row.status === 'matched' && row.hunter_id) {
         successHaptic();
-        confirmMatched(row.hunter_id ?? NEARBY_HUNTERS[0].id);
+        confirmMatched(row.hunter_id);
         router.replace('/status');
       }
     });
@@ -91,6 +93,7 @@ export default function MatchingScreen() {
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   const cancel = () => {
+    if (orderId) cancelOrder(orderId); // 真實模式：將訂單標記為 cancelled
     resetOrder();
     router.replace('/');
   };

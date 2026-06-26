@@ -3,13 +3,15 @@ import { type RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { type TargetTier } from '@/constants/brand';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
+export type OrderStatusDb = 'searching' | 'matched' | 'completed' | 'cancelled';
+
 /** DB 的 orders 一列（對應 SQL schema）*/
 export interface OrderRow {
   id: string;
   client_id: string | null;
   hunter_id: string | null;
   target_size: '小' | '大' | '飛';
-  status: 'searching' | 'matched' | 'completed';
+  status: OrderStatusDb;
   location_lat: number | null;
   location_lng: number | null;
   price: number | null;
@@ -22,6 +24,11 @@ const TARGET_SIZE: Record<TargetTier['id'], OrderRow['target_size']> = {
   big: '大',
   flying: '飛',
 };
+
+/** DB target_size 短碼 → tier id */
+export function tierIdFromSize(size: OrderRow['target_size']): TargetTier['id'] {
+  return size === '小' ? 'small' : size === '大' ? 'big' : 'flying';
+}
 
 export interface CreateOrderInput {
   clientId: string | null;
@@ -51,20 +58,86 @@ export async function createOrder(
   return { id: (data?.id as string | undefined) ?? null, error: error?.message ?? null };
 }
 
+/** 讀取單一訂單 */
+export async function fetchOrder(orderId: string): Promise<OrderRow | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+  return (data as OrderRow | null) ?? null;
+}
+
+/** 任務池：讀取所有 searching 中的訂單（新到舊）*/
+export async function fetchOpenOrders(): Promise<OrderRow[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  const { data } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('status', 'searching')
+    .order('created_at', { ascending: false });
+  return (data as OrderRow[] | null) ?? [];
+}
+
 /**
- * 訂閱單一訂單的狀態更新（Supabase Realtime）。
+ * 搶單：原子地把 searching 訂單更新為 matched 並寫入 hunter_id。
+ * ok=false 代表已被別的獵人搶走（或已不是 searching）。
+ */
+export async function acceptOrder(
+  orderId: string,
+  hunterId: string,
+): Promise<{ ok: boolean; error: string | null }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: true, error: null };
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ status: 'matched', hunter_id: hunterId })
+    .eq('id', orderId)
+    .eq('status', 'searching') // 只搶仍在 searching 的單 → 避免雙搶
+    .select('id')
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  return { ok: !!data, error: null };
+}
+
+/** 求救者取消：把訂單標記為 cancelled */
+export async function cancelOrder(orderId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
+}
+
+/** 獵人回報完成：把訂單標記為 completed */
+export async function completeOrderDb(orderId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  await supabase.from('orders').update({ status: 'completed' }).eq('id', orderId);
+}
+
+/**
+ * 訂閱單一訂單的狀態更新（求救端用）。
  * 回傳取消訂閱函式；未設定 Supabase 時為 no-op。
  */
 export function subscribeOrder(orderId: string, onUpdate: (row: OrderRow) => void): () => void {
   if (!isSupabaseConfigured || !supabase) return () => {};
   const client = supabase;
   const channel = client
-    .channel(`orders:${orderId}`)
+    .channel(`order:${orderId}`)
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
       (payload: RealtimePostgresChangesPayload<OrderRow>) => onUpdate(payload.new as OrderRow),
     )
+    .subscribe();
+  return () => {
+    client.removeChannel(channel);
+  };
+}
+
+/**
+ * 訂閱 orders 表的任何變更（任務池用）。收到事件即呼叫 onChange，
+ * 由呼叫端重新抓取 open orders。回傳取消訂閱函式。
+ */
+export function subscribeOpenOrders(onChange: () => void): () => void {
+  if (!isSupabaseConfigured || !supabase) return () => {};
+  const client = supabase;
+  const channel = client
+    .channel('orders:pool')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => onChange())
     .subscribe();
   return () => {
     client.removeChannel(channel);

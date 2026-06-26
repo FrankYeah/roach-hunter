@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import type { TargetTier } from '@/constants/brand';
+import type { OrderRow } from '@/lib/orders';
 
 /** 使用者身分：求救者（鎮宅金主）/ 獵人 */
 export type Role = 'requester' | 'hunter';
@@ -39,7 +40,10 @@ interface AppState {
 
   // ── 獵人：接單 ─────────────────────────────
   acceptedTaskId: string | null;
+  /** 真實模式：搶到的訂單列 */
+  acceptedOrder: OrderRow | null;
   acceptTask: (taskId: string) => void;
+  setAcceptedOrder: (order: OrderRow | null) => void;
   finishTask: () => void;
 
   // ── 帳號 / 登入 ────────────────────────────
@@ -76,8 +80,10 @@ export const useAppStore = create<AppState>((set) => ({
   setOrderId: (id) => set({ orderId: id }),
 
   acceptedTaskId: null,
+  acceptedOrder: null,
   acceptTask: (taskId) => set({ acceptedTaskId: taskId }),
-  finishTask: () => set({ acceptedTaskId: null }),
+  setAcceptedOrder: (order) => set({ acceptedOrder: order }),
+  finishTask: () => set({ acceptedTaskId: null, acceptedOrder: null }),
 
   isAuthenticated: false,
   authReady: false,

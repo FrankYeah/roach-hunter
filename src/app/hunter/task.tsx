@@ -5,9 +5,12 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { TARGET_TIERS } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
+import { distanceMeters, etaMinFromMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
+import { completeOrderDb, tierIdFromSize } from '@/lib/orders';
 import { useAppStore } from '@/store/useAppStore';
 
 const QUICK_REPLIES = ['我出發了，5 分鐘到', '請先別激怒牠 🙏', '門口到了，幫我開門', '收工！已解決 ✌️'];
@@ -19,14 +22,30 @@ function mmss(total: number) {
 }
 
 export default function HunterTaskScreen() {
+  const acceptedOrder = useAppStore((s) => s.acceptedOrder);
   const acceptedTaskId = useAppStore((s) => s.acceptedTaskId);
+  const userLocation = useAppStore((s) => s.userLocation);
   const finishTask = useAppStore((s) => s.finishTask);
 
-  const task = SOS_TASKS.find((t) => t.id === acceptedTaskId) ?? SOS_TASKS[0];
-  const tier = tierOf(task);
-  const net = netEarning(tier.price);
+  // 真實模式用搶到的訂單；否則退回 mock 任務
+  const mockTask = SOS_TASKS.find((t) => t.id === acceptedTaskId) ?? SOS_TASKS[0];
+  const tier = acceptedOrder
+    ? TARGET_TIERS.find((t) => t.id === tierIdFromSize(acceptedOrder.target_size))!
+    : tierOf(mockTask);
+  const price = acceptedOrder ? acceptedOrder.price ?? tier.price : tier.price;
+  const net = netEarning(price);
+  const distanceM = acceptedOrder
+    ? userLocation && acceptedOrder.location_lat != null && acceptedOrder.location_lng != null
+      ? distanceMeters(userLocation, {
+          latitude: acceptedOrder.location_lat,
+          longitude: acceptedOrder.location_lng,
+        })
+      : null
+    : mockTask.distanceM;
+  const etaMin = acceptedOrder ? (distanceM != null ? etaMinFromMeters(distanceM) : 6) : mockTask.etaMin;
+  const address = acceptedOrder ? '地圖上的呼救位置' : mockTask.address;
 
-  const [secs, setSecs] = useState(task.etaMin * 60);
+  const [secs, setSecs] = useState(etaMin * 60);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -45,6 +64,7 @@ export default function HunterTaskScreen() {
 
   const complete = () => {
     successHaptic();
+    if (acceptedOrder) completeOrderDb(acceptedOrder.id); // 真實模式：標記完成
     finishTask();
     router.replace('/hunter');
   };
@@ -63,7 +83,7 @@ export default function HunterTaskScreen() {
         </Pressable>
         <View className="ml-3">
           <Text className="text-xl font-black text-ink">前往救援中</Text>
-          <Text className="text-xs text-mute">{task.address}</Text>
+          <Text className="text-xs text-mute">{address}</Text>
         </View>
       </View>
 
@@ -75,7 +95,8 @@ export default function HunterTaskScreen() {
             {arrived ? '00:00' : mmss(secs)}
           </Text>
           <Text className="mt-1 text-xs text-silver">
-            距離 {task.distanceM} m・這趟淨收益 <Text className="font-bold text-leaf">${net}</Text>
+            距離 {distanceM == null ? '—' : `${distanceM} m`}・這趟淨收益{' '}
+            <Text className="font-bold text-leaf">${net}</Text>
           </Text>
         </View>
 
@@ -85,8 +106,8 @@ export default function HunterTaskScreen() {
             <FontAwesome5 name="map-marker-alt" size={18} color="#FFFFFF" />
           </View>
           <View className="ml-3 flex-1">
-            <Text className="text-sm font-bold text-ink">{task.requesterTitle}・{tier.label}</Text>
-            <Text className="text-xs text-mute">{task.address}</Text>
+            <Text className="text-sm font-bold text-ink">鎮宅金主・{tier.label}</Text>
+            <Text className="text-xs text-mute">{address}</Text>
           </View>
           <View className="items-end">
             <Text className="text-[11px] text-mute">目標</Text>

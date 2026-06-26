@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
@@ -78,19 +78,27 @@ export default function OrderScreen() {
   const setOrderId = useAppStore((s) => s.setOrderId);
   const userId = useAppStore((s) => s.userId);
   const userLocation = useAppStore((s) => s.userLocation);
+  const [submitting, setSubmitting] = useState(false);
 
   const confirm = async () => {
-    startMatching({ tierId, addonIds, total });
-    router.push('/matching');
-    // 寫入 Supabase（未設定則略過，不影響本地流程）
-    const { id } = await createOrder({
+    if (submitting) return;
+    setSubmitting(true);
+    // 先真實寫入 Supabase（成功才進雷達頁，確保 orderId 已就緒）
+    const { id, error } = await createOrder({
       clientId: userId,
       tierId,
       price: total,
       lat: userLocation?.latitude ?? null,
       lng: userLocation?.longitude ?? null,
     });
-    if (id) setOrderId(id);
+    setSubmitting(false);
+    if (error) {
+      Alert.alert('呼救失敗', error);
+      return;
+    }
+    startMatching({ tierId, addonIds, total });
+    setOrderId(id);
+    router.push('/matching');
   };
 
   return (
@@ -187,13 +195,19 @@ export default function OrderScreen() {
         </View>
         <Pressable
           onPress={confirm}
+          disabled={submitting}
           accessibilityRole="button"
           accessibilityLabel={`確認呼救，指導價 ${total} 元起，開始媒合獵人`}
-          style={({ pressed }) => [shadowSos, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+          style={({ pressed }) => [
+            shadowSos,
+            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: submitting ? 0.6 : 1 },
+          ]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
             <Ionicons name="flash" size={20} color="#FFFFFF" />
-            <Text className="ml-2 text-lg font-black text-white">確認呼救・開始媒合</Text>
+            <Text className="ml-2 text-lg font-black text-white">
+              {submitting ? '送出中…' : '確認呼救・開始媒合'}
+            </Text>
           </View>
         </Pressable>
       </View>

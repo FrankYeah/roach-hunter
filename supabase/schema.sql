@@ -7,7 +7,7 @@ create table if not exists public.orders (
   hunter_id     uuid references auth.users (id) on delete set null,
   target_size   text not null check (target_size in ('小', '大', '飛')),
   status        text not null default 'searching'
-                  check (status in ('searching', 'matched', 'completed')),
+                  check (status in ('searching', 'matched', 'completed', 'cancelled')),
   location_lat  double precision,
   location_lng  double precision,
   price         integer,
@@ -47,3 +47,10 @@ create policy "update own or accepting orders"
 -- 讓前端能 subscribe 到 UPDATE；full 可讓事件帶完整列資料
 alter table public.orders replica identity full;
 alter publication supabase_realtime add table public.orders;
+
+-- ── 既有資料表升級 ─────────────────────────────────────────────────
+-- 若你先前已執行過「沒有 cancelled」的舊版 schema，請『補跑這段』即可：
+alter table public.orders drop constraint if exists orders_status_check;
+alter table public.orders
+  add constraint orders_status_check
+  check (status in ('searching', 'matched', 'completed', 'cancelled'));
