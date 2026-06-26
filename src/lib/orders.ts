@@ -1,7 +1,9 @@
 import { type RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 import { type TargetTier } from '@/constants/brand';
+import { isValidLatLng } from '@/lib/geo';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { type LatLng } from '@/store/useAppStore';
 
 export type OrderStatusDb = 'searching' | 'matched' | 'completed' | 'cancelled';
 
@@ -14,6 +16,8 @@ export interface OrderRow {
   status: OrderStatusDb;
   location_lat: number | null;
   location_lng: number | null;
+  hunter_lat: number | null;
+  hunter_lng: number | null;
   price: number | null;
   created_at: string;
 }
@@ -83,8 +87,10 @@ export async function fetchOpenOrders(): Promise<OrderRow[]> {
 export async function acceptOrder(
   orderId: string,
   hunterId: string,
+  hunterLoc: LatLng | null,
 ): Promise<{ ok: boolean; error: string | null }> {
   if (!isSupabaseConfigured || !supabase) return { ok: true, error: null };
+  // 1) 原子搶單：只動 status + hunter_id，這樣即使尚未跑 hunter_lat/lng 遷移也不會壞
   const { data, error } = await supabase
     .from('orders')
     .update({ status: 'matched', hunter_id: hunterId })
@@ -93,7 +99,16 @@ export async function acceptOrder(
     .select('id')
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
-  return { ok: !!data, error: null };
+  if (!data) return { ok: false, error: null };
+  // 2) best-effort 寫入獵人座標（讓求救端能算 ETA）；欄位若未遷移就忽略錯誤
+  const loc = isValidLatLng(hunterLoc) ? hunterLoc : null;
+  if (loc) {
+    await supabase
+      .from('orders')
+      .update({ hunter_lat: loc.latitude, hunter_lng: loc.longitude })
+      .eq('id', orderId);
+  }
+  return { ok: true, error: null };
 }
 
 /** 求救者取消：把訂單標記為 cancelled */

@@ -16,6 +16,13 @@ export const BRAND = {
 export const HUNTER_RANKS = ['拖鞋見習生', '捲報紙達人', '白金殺手'] as const;
 export type HunterRank = (typeof HUNTER_RANKS)[number];
 
+/** 由完成任務數推導獵人等級（真實 profile 沒有 rank 欄位，用此換算）*/
+export function rankFromCompleted(completed: number): HunterRank {
+  if (completed >= 200) return '白金殺手';
+  if (completed >= 50) return '捲報紙達人';
+  return '拖鞋見習生';
+}
+
 /** 各等級對應的視覺強調樣式（白金殺手＝金屬銀徽章） */
 export interface RankStyle {
   badge: string;

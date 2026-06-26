@@ -35,12 +35,20 @@ export function distanceMeters(a: LatLng, b: LatLng): number {
 }
 
 /**
- * 防呆版距離：任一端座標無效（缺失 / (0,0) / 超範圍）即回傳 null，
- * 由呼叫端顯示「距離計算中…」，絕不算出極端數值。
+ * 在地服務的合理距離上限（公尺）。超過此距離幾乎必為定位資料異常
+ * （例如 iOS 模擬器預設定位在美國 Cupertino，距台灣約 1 萬公里），
+ * 視為「定位尚未就緒」而非真實距離。
+ */
+export const MAX_SERVICE_METERS = 100_000; // 100 km
+
+/**
+ * 防呆版距離：任一端座標無效（缺失 / (0,0) / 超範圍）或算出來超過服務半徑
+ * 時回傳 null，由呼叫端顯示「定位計算中…」，絕不算出極端數值。
  */
 export function safeDistanceMeters(a: MaybeLatLng, b: MaybeLatLng): number | null {
   if (!isValidLatLng(a) || !isValidLatLng(b)) return null;
-  return distanceMeters(a, b);
+  const d = distanceMeters(a, b);
+  return d > MAX_SERVICE_METERS ? null : d;
 }
 
 /** 由距離粗估抵達分鐘（約市區機車 250 m/分），夾在 2–120 分鐘的合理區間 */

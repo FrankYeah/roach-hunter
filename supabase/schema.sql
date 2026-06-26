@@ -10,6 +10,9 @@ create table if not exists public.orders (
                   check (status in ('searching', 'matched', 'completed', 'cancelled')),
   location_lat  double precision,
   location_lng  double precision,
+  -- 獵人接單當下的座標（讓求救端能算出 hunter→client 的真實距離 / ETA）
+  hunter_lat    double precision,
+  hunter_lng    double precision,
   price         integer,
   created_at    timestamptz not null default now()
 );
@@ -54,3 +57,42 @@ alter table public.orders drop constraint if exists orders_status_check;
 alter table public.orders
   add constraint orders_status_check
   check (status in ('searching', 'matched', 'completed', 'cancelled'));
+
+-- 第六階段：替既有 orders 補上獵人座標欄位（idempotent）
+alter table public.orders add column if not exists hunter_lat double precision;
+alter table public.orders add column if not exists hunter_lng double precision;
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第六階段：使用者檔案 profiles                                      ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+create table if not exists public.profiles (
+  id              uuid primary key references auth.users (id) on delete cascade,
+  display_name    text not null default '鎮宅金主',
+  avatar_url      text,
+  rating          numeric not null default 5.0,
+  completed_tasks integer not null default 0,
+  updated_at      timestamptz not null default now()
+);
+
+-- ── Row Level Security ─────────────────────────────────────────────
+alter table public.profiles enable row level security;
+
+-- 所有登入者都能讀任何人的 profile（要看到對方名稱 / 評分）
+create policy "profiles readable by authenticated"
+  on public.profiles for select
+  to authenticated
+  using (true);
+
+-- 只能建立 id = 自己 的 profile（upsert 的 insert 分支）
+create policy "users insert own profile"
+  on public.profiles for insert
+  to authenticated
+  with check (auth.uid() = id);
+
+-- 只能更新自己的 profile
+create policy "users update own profile"
+  on public.profiles for update
+  to authenticated
+  using (auth.uid() = id)
+  with check (auth.uid() = id);

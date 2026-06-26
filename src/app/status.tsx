@@ -1,12 +1,18 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { RankBadge } from '@/components/rank-badge';
+import { rankFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
+import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
+import { fetchOrder, subscribeOrder, type OrderRow } from '@/lib/orders';
+import { fetchProfile, type Profile } from '@/lib/profiles';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
 const STEPS = ['媒合成功', '獵人出發', '抵達現場', '任務完成'];
@@ -15,10 +21,58 @@ const CURRENT_STEP = 1;
 const QUICK_REPLIES = ['門口在鞋櫃旁 🙏', '牠在廚房水槽！', '我先去房間躲一下', '拜託快一點 😭'];
 
 export default function StatusScreen() {
+  const configured = isSupabaseConfigured;
   const matchedHunterId = useAppStore((s) => s.matchedHunterId);
+  const orderId = useAppStore((s) => s.orderId);
   const completeOrder = useAppStore((s) => s.completeOrder);
-  // 媒合到的獵人（取流程中媒合的那位，否則退回最近的白金殺手）
-  const hunter = NEARBY_HUNTERS.find((h) => h.id === matchedHunterId) ?? NEARBY_HUNTERS[0];
+
+  // mock 後備（未設定 Supabase 時沿用）
+  const mockHunter = NEARBY_HUNTERS.find((h) => h.id === matchedHunterId) ?? NEARBY_HUNTERS[0];
+
+  // 真實模式：讀取獵人 profile + 訂單列（含獵人接單座標）
+  const [hunterProfile, setHunterProfile] = useState<Profile | null>(null);
+  const [orderRow, setOrderRow] = useState<OrderRow | null>(null);
+
+  useEffect(() => {
+    if (!configured || !matchedHunterId) return;
+    let active = true;
+    fetchProfile(matchedHunterId).then((p) => active && setHunterProfile(p));
+    return () => {
+      active = false;
+    };
+  }, [configured, matchedHunterId]);
+
+  useEffect(() => {
+    if (!configured || !orderId) return;
+    let active = true;
+    // 先抓一次，再訂閱更新（獵人座標可能在跳轉後才寫入 → Realtime 補上）
+    fetchOrder(orderId).then((o) => active && o && setOrderRow(o));
+    const unsub = subscribeOrder(orderId, (row) => setOrderRow(row));
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [configured, orderId]);
+
+  // 真實距離 = 求救者家 → 獵人接單位置（純從訂單列取，套防呆）
+  const distanceM = configured
+    ? safeDistanceMeters(
+        { latitude: orderRow?.location_lat, longitude: orderRow?.location_lng },
+        { latitude: orderRow?.hunter_lat, longitude: orderRow?.hunter_lng },
+      )
+    : mockHunter.distanceM;
+  const etaMin = configured
+    ? distanceM != null
+      ? etaMinFromMeters(distanceM)
+      : null
+    : mockHunter.etaMin;
+
+  const name = configured ? hunterProfile?.display_name ?? '媒合中的獵人' : mockHunter.name;
+  const rating = configured ? hunterProfile?.rating ?? null : mockHunter.rating;
+  const completed = configured ? hunterProfile?.completed_tasks ?? 0 : mockHunter.kills;
+  const rank = configured ? rankFromCompleted(completed) : mockHunter.rank;
+  const avatarColor = configured ? '#C9A66B' : mockHunter.avatarColor;
+  const blurb = configured ? '準備好拖鞋，正在趕來' : mockHunter.blurb;
 
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
@@ -42,11 +96,17 @@ export default function StatusScreen() {
         {/* ETA 大字 */}
         <View className="mt-2 items-center rounded-[28px] bg-sos/10 py-6" style={shadowSoft}>
           <Text className="text-xs font-semibold text-sos">預計抵達時間</Text>
-          <View className="mt-1 flex-row items-end">
-            <Text className="text-6xl font-black text-sos">{hunter.etaMin}</Text>
-            <Text className="mb-2 ml-1 text-xl font-bold text-sos">分鐘</Text>
-          </View>
-          <Text className="mt-1 text-xs text-mute">距離你家約 {hunter.distanceM} 公尺</Text>
+          {etaMin == null ? (
+            <Text className="mt-2 text-2xl font-black text-sos">定位計算中…</Text>
+          ) : (
+            <View className="mt-1 flex-row items-end">
+              <Text className="text-6xl font-black text-sos">{etaMin}</Text>
+              <Text className="mb-2 ml-1 text-xl font-bold text-sos">分鐘</Text>
+            </View>
+          )}
+          <Text className="mt-1 text-xs text-mute">
+            {distanceM == null ? '位置同步中，稍候顯示距離' : `距離你家約 ${distanceM} 公尺`}
+          </Text>
         </View>
 
         {/* 進度條 */}
@@ -86,22 +146,24 @@ export default function StatusScreen() {
         <View className="mt-6 flex-row items-center rounded-3xl bg-white p-4" style={shadowSoft}>
           <View
             className="h-16 w-16 items-center justify-center rounded-full border-[3px] border-white"
-            style={{ backgroundColor: hunter.avatarColor, ...shadowSoft }}
+            style={{ backgroundColor: avatarColor, ...shadowSoft }}
           >
             <FontAwesome5 name="shoe-prints" size={24} color="#FFFFFF" />
           </View>
           <View className="ml-4 flex-1">
             <View className="flex-row items-center">
-              <Text className="text-lg font-black text-ink">{hunter.name}</Text>
-              <View className="ml-2 flex-row items-center">
-                <Ionicons name="star" size={13} color="#F5A623" />
-                <Text className="ml-0.5 text-xs font-bold text-ink">{hunter.rating}</Text>
-              </View>
+              <Text className="text-lg font-black text-ink">{name}</Text>
+              {rating != null && (
+                <View className="ml-2 flex-row items-center">
+                  <Ionicons name="star" size={13} color="#F5A623" />
+                  <Text className="ml-0.5 text-xs font-bold text-ink">{rating.toFixed(1)}</Text>
+                </View>
+              )}
             </View>
             <View className="mt-1">
-              <RankBadge rank={hunter.rank} />
+              <RankBadge rank={rank} />
             </View>
-            <Text className="mt-1 text-xs text-mute">已出動 {hunter.kills} 次・{hunter.blurb}</Text>
+            <Text className="mt-1 text-xs text-mute">已出動 {completed} 次・{blurb}</Text>
           </View>
         </View>
 
@@ -128,7 +190,7 @@ export default function StatusScreen() {
 
           {/* 輸入列（框架） */}
           <View className="flex-row items-center rounded-full bg-white px-3 py-2">
-            <Text className="flex-1 text-sm text-mute">傳訊息給 {hunter.name}…</Text>
+            <Text className="flex-1 text-sm text-mute">傳訊息給 {name}…</Text>
             <View className="h-9 w-9 items-center justify-center rounded-full bg-wood-100">
               <Ionicons name="call" size={16} color="#9A763C" />
             </View>

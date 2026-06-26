@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { ensureProfile } from '@/lib/profiles';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -25,10 +26,14 @@ export default function RootLayout() {
     supabase.auth.getSession().then(({ data }) => {
       if (!active) return;
       applySession(data.session);
+      const uid = data.session?.user?.id ?? null;
+      if (uid) ensureProfile(uid, useAppStore.getState().role); // 登入後確保有預設 profile
       setAuthReady(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       applySession(session);
+      const uid = session?.user?.id ?? null;
+      if (uid) ensureProfile(uid, useAppStore.getState().role);
     });
     return () => {
       active = false;

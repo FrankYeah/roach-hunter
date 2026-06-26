@@ -11,6 +11,7 @@ import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
 import { completeOrderDb, tierIdFromSize } from '@/lib/orders';
+import { fetchProfile, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
 const QUICK_REPLIES = ['我出發了，5 分鐘到', '請先別激怒牠 🙏', '門口到了，幫我開門', '收工！已解決 ✌️'];
@@ -43,6 +44,18 @@ export default function HunterTaskScreen() {
     : mockTask.distanceM;
   const etaMin = acceptedOrder ? (distanceM != null ? etaMinFromMeters(distanceM) : 10) : mockTask.etaMin;
   const address = acceptedOrder ? '地圖上的呼救位置' : mockTask.address;
+
+  // 讀取對方（鎮宅金主）的真實 profile
+  const [client, setClient] = useState<Profile | null>(null);
+  useEffect(() => {
+    if (!acceptedOrder?.client_id) return;
+    let active = true;
+    fetchProfile(acceptedOrder.client_id).then((p) => active && setClient(p));
+    return () => {
+      active = false;
+    };
+  }, [acceptedOrder?.client_id]);
+  const clientName = client?.display_name ?? '鎮宅金主';
 
   // 倒數秒數再夾一層：不合理（NaN / 負 / 超過 2 小時）一律退回 10:00
   const initialSecs = Number.isFinite(etaMin) && etaMin > 0 && etaMin <= 120 ? etaMin * 60 : 600;
@@ -96,7 +109,7 @@ export default function HunterTaskScreen() {
             {arrived ? '00:00' : mmss(secs)}
           </Text>
           <Text className="mt-1 text-xs text-silver">
-            距離 {distanceM == null ? '計算中…' : `${distanceM} m`}・這趟淨收益{' '}
+            距離 {distanceM == null ? '定位計算中…' : `${distanceM} m`}・這趟淨收益{' '}
             <Text className="font-bold text-leaf">${net}</Text>
           </Text>
         </View>
@@ -107,8 +120,16 @@ export default function HunterTaskScreen() {
             <FontAwesome5 name="map-marker-alt" size={18} color="#FFFFFF" />
           </View>
           <View className="ml-3 flex-1">
-            <Text className="text-sm font-bold text-ink">鎮宅金主・{tier.label}</Text>
-            <Text className="text-xs text-mute">{address}</Text>
+            <View className="flex-row items-center">
+              <Text className="text-sm font-bold text-ink">{clientName}</Text>
+              {client != null && (
+                <View className="ml-1.5 flex-row items-center">
+                  <Ionicons name="star" size={11} color="#F5A623" />
+                  <Text className="ml-0.5 text-[11px] font-bold text-ink">{client.rating.toFixed(1)}</Text>
+                </View>
+              )}
+            </View>
+            <Text className="text-xs text-mute">{tier.label}・{address}</Text>
           </View>
           <View className="items-end">
             <Text className="text-[11px] text-mute">目標</Text>
@@ -117,7 +138,7 @@ export default function HunterTaskScreen() {
         </View>
 
         {/* 與求救者對話 */}
-        <Text className="mb-2 mt-6 text-base font-black text-ink">與鎮宅金主聯絡</Text>
+        <Text className="mb-2 mt-6 text-base font-black text-ink">與 {clientName} 聯絡</Text>
         <View className="rounded-3xl bg-cream p-3" style={shadowSoft}>
           <View className="mb-2 max-w-[80%] self-start rounded-2xl rounded-tl-md bg-white px-3 py-2">
             <Text className="text-sm text-ink">獵人你好！牠在{tier.label === '會飛的' ? '天花板' : '角落'}，拜託小心 🙏</Text>

@@ -19,6 +19,7 @@ import {
   tierIdFromSize,
   type OrderRow,
 } from '@/lib/orders';
+import { ensureProfile } from '@/lib/profiles';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore, type LatLng } from '@/store/useAppStore';
 
@@ -84,7 +85,7 @@ function PoolCard({ item, busy, onAccept }: { item: PoolItem; busy: boolean; onA
             <View className="ml-2 flex-row items-center">
               <Ionicons name="navigate" size={12} color="#9A8F80" />
               <Text className="ml-0.5 text-xs text-mute">
-                {item.distanceM == null ? '距離計算中…' : `${item.distanceM} m`}
+                {item.distanceM == null ? '定位計算中…' : `${item.distanceM} m`}
               </Text>
             </View>
             <Text className="ml-2 text-xs text-mute">· {item.agoMin} 分鐘前</Text>
@@ -150,6 +151,11 @@ export default function HunterPoolScreen() {
     return unsub;
   }, [configured, refresh]);
 
+  // 進入獵人模式：確保有 profile（名稱仍是預設時，自動同步成「見習獵人」）
+  useEffect(() => {
+    if (userId) ensureProfile(userId, 'hunter');
+  }, [userId]);
+
   const backToRequester = () => {
     selectHaptic();
     toggleRole();
@@ -159,7 +165,7 @@ export default function HunterPoolScreen() {
   const acceptReal = async (order: OrderRow) => {
     if (acceptingId) return;
     setAcceptingId(order.id);
-    const { ok, error } = await acceptOrder(order.id, userId ?? '');
+    const { ok, error } = await acceptOrder(order.id, userId ?? '', userLocation);
     setAcceptingId(null);
     if (error) {
       Alert.alert('接單失敗', error);
