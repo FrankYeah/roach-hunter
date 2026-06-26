@@ -1,5 +1,6 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,6 +9,8 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { CURRENT_USER, NEARBY_HUNTERS, type Hunter } from '@/data/hunters';
+import { selectHaptic, tapHaptic } from '@/lib/haptics';
+import { useAppStore } from '@/store/useAppStore';
 
 /** 地圖上的「閒置獵人」標記，用腳丫子圖示代表 */
 function FootMarker({ hunter }: { hunter: Hunter }) {
@@ -59,6 +62,18 @@ function MapDecor() {
 export default function HomeScreen() {
   const onlineHunters = NEARBY_HUNTERS.filter((h) => h.online);
   const nearestEta = Math.min(...onlineHunters.map((h) => h.etaMin));
+  const toggleRole = useAppStore((s) => s.toggleRole);
+
+  const callSos = () => {
+    tapHaptic();
+    router.push('/order');
+  };
+
+  const switchToHunter = () => {
+    selectHaptic();
+    toggleRole();
+    router.replace('/hunter');
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
@@ -68,12 +83,20 @@ export default function HomeScreen() {
           <Text className="text-2xl font-black text-ink">{BRAND.appName}</Text>
           <Text className="mt-0.5 text-xs text-mute">{BRAND.tagline}</Text>
         </View>
-        <View className="flex-row items-center rounded-full bg-cream px-3 py-1.5" style={shadowSoft}>
+        {/* 點頭像即可切換為「獵人」身分 */}
+        <Pressable
+          onPress={switchToHunter}
+          accessibilityRole="button"
+          accessibilityLabel="切換為獵人身分"
+          className="flex-row items-center rounded-full bg-cream px-3 py-1.5"
+          style={shadowSoft}
+        >
           <View className="h-7 w-7 items-center justify-center rounded-full bg-wood-300">
             <Ionicons name="home" size={14} color="#FFFFFF" />
           </View>
           <Text className="ml-2 text-xs font-bold text-ink">{CURRENT_USER.title}</Text>
-        </View>
+          <MaterialCommunityIcons name="swap-horizontal" size={14} color="#9A8F80" style={{ marginLeft: 6 }} />
+        </Pressable>
       </View>
 
       {/* 地圖 */}
@@ -118,7 +141,7 @@ export default function HomeScreen() {
         </View>
 
         <Pressable
-          onPress={() => router.push('/order')}
+          onPress={callSos}
           accessibilityRole="button"
           accessibilityLabel={`${BRAND.sosLabel} 呼叫附近獵人`}
           accessibilityHint="開啟呼救表單，選擇現場狀況與指導價"

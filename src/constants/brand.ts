@@ -4,7 +4,7 @@
  */
 
 export const BRAND = {
-  appName: '乾，有那個啦',
+  appName: '乾，出現了！',
   tagline: '穿著夾腳拖，馬上到你家救援',
   /** 首頁巨大呼救按鈕文案（不可更動） */
   sosLabel: '乾，出現了！',

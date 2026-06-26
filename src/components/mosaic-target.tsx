@@ -36,25 +36,13 @@ export function MosaicTarget({ size = 64, vibrate = true, color = '#2A2521' }: M
     if (!vibrate) return;
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(shake, {
-          toValue: 1,
-          duration: 90,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shake, {
-          toValue: -1,
-          duration: 90,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shake, {
-          toValue: 0,
-          duration: 90,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-        Animated.delay(900),
+        // 一陣快速抖動，營造「牠在動」的臨場感
+        Animated.timing(shake, { toValue: 1, duration: 65, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: -1, duration: 65, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: 1, duration: 65, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: -1, duration: 65, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: 0, duration: 65, easing: Easing.linear, useNativeDriver: true }),
+        Animated.delay(600),
       ]),
     );
     loop.start();

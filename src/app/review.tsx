@@ -9,6 +9,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { CURRENT_USER, NEARBY_HUNTERS } from '@/data/hunters';
+import { useAppStore } from '@/store/useAppStore';
 
 const hunter = NEARBY_HUNTERS[0];
 const PRAISE_TAGS = ['手腳俐落', '很準時', '有禮貌', '善後乾淨', '一擊必殺'];
@@ -16,6 +17,13 @@ const PRAISE_TAGS = ['手腳俐落', '很準時', '有禮貌', '善後乾淨', '
 export default function ReviewScreen() {
   const [rating, setRating] = useState(5);
   const [tags, setTags] = useState<string[]>(['一擊必殺']);
+
+  const resetOrder = useAppStore((s) => s.resetOrder);
+  // 結案：清空訂單狀態並回到首頁根畫面
+  const finishAndHome = () => {
+    resetOrder();
+    router.dismissAll();
+  };
 
   // 稱號解鎖動畫：掛載後彈入
   const reveal = useRef(new Animated.Value(0)).current;
@@ -51,7 +59,7 @@ export default function ReviewScreen() {
       <View className="flex-row items-center justify-between px-4 pb-2 pt-1">
         <Text className="text-xl font-black text-ink">任務完成！</Text>
         <Pressable
-          onPress={() => router.replace('/')}
+          onPress={finishAndHome}
           accessibilityRole="button"
           accessibilityLabel="關閉，回到首頁"
           className="h-10 w-10 items-center justify-center rounded-full bg-cream"
@@ -160,7 +168,7 @@ export default function ReviewScreen() {
       {/* 底部 */}
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
         <Pressable
-          onPress={() => router.replace('/')}
+          onPress={finishAndHome}
           accessibilityRole="button"
           accessibilityLabel="送出評價，完成"
           style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}

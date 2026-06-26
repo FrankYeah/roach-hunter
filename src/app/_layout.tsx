@@ -17,6 +17,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="order" options={{ presentation: 'card' }} />
+        <Stack.Screen name="matching" options={{ animation: 'fade', gestureEnabled: false }} />
         <Stack.Screen name="status" />
         <Stack.Screen name="review" />
       </Stack>

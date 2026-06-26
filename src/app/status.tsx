@@ -7,16 +7,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RankBadge } from '@/components/rank-badge';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
+import { useAppStore } from '@/store/useAppStore';
 
 const STEPS = ['媒合成功', '獵人出發', '抵達現場', '任務完成'];
 const CURRENT_STEP = 1;
 
 const QUICK_REPLIES = ['門口在鞋櫃旁 🙏', '牠在廚房水槽！', '我先去房間躲一下', '拜託快一點 😭'];
 
-/** 媒合到的獵人（mock：派最近的白金殺手） */
-const hunter = NEARBY_HUNTERS[0];
-
 export default function StatusScreen() {
+  const matchedHunterId = useAppStore((s) => s.matchedHunterId);
+  const completeOrder = useAppStore((s) => s.completeOrder);
+  // 媒合到的獵人（取流程中媒合的那位，否則退回最近的白金殺手）
+  const hunter = NEARBY_HUNTERS.find((h) => h.id === matchedHunterId) ?? NEARBY_HUNTERS[0];
+
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
       {/* 標題列 */}
@@ -139,7 +142,10 @@ export default function StatusScreen() {
       {/* 底部：完成任務（demo 用，前往評價）*/}
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
         <Pressable
-          onPress={() => router.push('/review')}
+          onPress={() => {
+            completeOrder();
+            router.push('/review');
+          }}
           accessibilityRole="button"
           accessibilityLabel="獵人已解決，前往評價"
           style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}

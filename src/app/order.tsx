@@ -9,6 +9,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { ADDONS, BRAND, CHASE_FEE, TARGET_TIERS, type TargetTier } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { CURRENT_USER } from '@/data/hunters';
+import { useAppStore } from '@/store/useAppStore';
 
 /** 現場狀況選項卡 */
 function TierCard({
@@ -71,6 +72,12 @@ export default function OrderScreen() {
 
   const toggleAddon = (id: string) =>
     setAddonIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const startMatching = useAppStore((s) => s.startMatching);
+  const confirm = () => {
+    startMatching({ tierId, addonIds, total });
+    router.push('/matching');
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
@@ -165,7 +172,7 @@ export default function OrderScreen() {
           </Text>
         </View>
         <Pressable
-          onPress={() => router.push('/status')}
+          onPress={confirm}
           accessibilityRole="button"
           accessibilityLabel={`確認呼救，指導價 ${total} 元起，開始媒合獵人`}
           style={({ pressed }) => [shadowSos, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
