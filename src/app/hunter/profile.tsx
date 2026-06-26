@@ -2,14 +2,23 @@ import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LevelBadge } from '@/components/level-badge';
+import { levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { signOut } from '@/lib/auth';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
+import { fetchProfile, updateProfile, type Gender, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
+
+const GENDERS: { id: Gender; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { id: 'male', label: '男性', icon: 'male' },
+  { id: 'female', label: '女性', icon: 'female' },
+  { id: 'unspecified', label: '不公開', icon: 'remove-circle-outline' },
+];
 
 type DocKey = 'idFront' | 'idBack' | 'police';
 
@@ -70,8 +79,38 @@ function UploadRow({
 export default function HunterProfileScreen() {
   const verification = useAppStore((s) => s.verification);
   const setVerificationDoc = useAppStore((s) => s.setVerificationDoc);
+  const userId = useAppStore((s) => s.userId);
 
   const verified = verification.idFront && verification.idBack;
+
+  // 讀取自己的 profile：回填等級、性別、與「跨裝置保留」的認證狀態
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [gender, setGender] = useState<Gender>('unspecified');
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    fetchProfile(userId).then((p) => {
+      if (!active || !p) return;
+      setProfile(p);
+      setGender(p.gender);
+      if (p.id_verified) {
+        setVerificationDoc('idFront', true);
+        setVerificationDoc('idBack', true);
+      }
+      if (p.police_verified) setVerificationDoc('police', true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [userId, setVerificationDoc]);
+
+  const level = levelFromCompleted(profile?.completed_tasks ?? 0);
+
+  const chooseGender = (g: Gender) => {
+    selectHaptic();
+    setGender(g);
+    updateProfile(userId, { gender: g });
+  };
 
   // 白金徽章彈入動畫
   const reveal = useRef(new Animated.Value(0)).current;
@@ -87,11 +126,21 @@ export default function HunterProfileScreen() {
     wasVerified.current = verified;
   }, [verified, reveal]);
 
+  // 改變某份文件狀態，並把「整體認證結果」同步寫回 profile
+  const setDoc = (key: DocKey, value: boolean) => {
+    setVerificationDoc(key, value);
+    const next = { ...verification, [key]: value };
+    updateProfile(userId, {
+      id_verified: next.idFront && next.idBack,
+      police_verified: next.police,
+    });
+  };
+
   const upload = (key: DocKey) => {
     selectHaptic();
-    setVerificationDoc(key, true);
+    setDoc(key, true);
   };
-  const remove = (key: DocKey) => setVerificationDoc(key, false);
+  const remove = (key: DocKey) => setDoc(key, false);
 
   const badgeScale = reveal.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
 
@@ -118,16 +167,46 @@ export default function HunterProfileScreen() {
           </View>
           <View className="ml-4 flex-1">
             <View className="flex-row items-center">
-              <Text className="text-lg font-black text-ink">你</Text>
+              <Text className="text-lg font-black text-ink">{profile?.display_name ?? '見習獵人'}</Text>
               {verified && (
                 <MaterialCommunityIcons name="shield-check" size={16} color="#969DA9" style={{ marginLeft: 6 }} />
               )}
             </View>
-            <View className="mt-1 flex-row items-center self-start rounded-full bg-wood-100 px-2 py-0.5">
-              <MaterialCommunityIcons name="shoe-sneaker" size={12} color="#9A763C" />
-              <Text className="ml-1 text-xs font-semibold text-wood-600">拖鞋見習生</Text>
+            <View className="mt-1 flex-row items-center">
+              <LevelBadge level={level} />
+              <Text className="ml-2 text-xs text-mute">已出動 {profile?.completed_tasks ?? 0} 次</Text>
             </View>
           </View>
+        </View>
+
+        {/* 性別 */}
+        <View className="mb-2 mt-6 flex-row items-center">
+          <MaterialCommunityIcons name="account-outline" size={18} color="#2A2521" />
+          <Text className="ml-2 text-base font-black text-ink">性別</Text>
+        </View>
+        <View className="flex-row">
+          {GENDERS.map((g) => {
+            const on = gender === g.id;
+            return (
+              <Pressable
+                key={g.id}
+                onPress={() => chooseGender(g.id)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`性別 ${g.label}`}
+                className="mr-2"
+              >
+                <View
+                  className={`flex-row items-center rounded-full border px-3.5 py-2 ${
+                    on ? 'border-sos bg-sos/10' : 'border-wood-200 bg-white'
+                  }`}
+                >
+                  <Ionicons name={g.icon} size={14} color={on ? '#FB6B4B' : '#9A8F80'} />
+                  <Text className={`ml-1.5 text-xs font-bold ${on ? 'text-sos' : 'text-ink'}`}>{g.label}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* 白金安全徽章（認證完成才出現）*/}

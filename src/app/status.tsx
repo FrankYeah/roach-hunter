@@ -5,8 +5,8 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { RankBadge } from '@/components/rank-badge';
-import { rankFromCompleted } from '@/constants/brand';
+import { LevelBadge } from '@/components/level-badge';
+import { levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
@@ -70,7 +70,7 @@ export default function StatusScreen() {
   const name = configured ? hunterProfile?.display_name ?? '媒合中的獵人' : mockHunter.name;
   const rating = configured ? hunterProfile?.rating ?? null : mockHunter.rating;
   const completed = configured ? hunterProfile?.completed_tasks ?? 0 : mockHunter.kills;
-  const rank = configured ? rankFromCompleted(completed) : mockHunter.rank;
+  const level = levelFromCompleted(completed);
   const avatarColor = configured ? '#C9A66B' : mockHunter.avatarColor;
   const blurb = configured ? '準備好拖鞋，正在趕來' : mockHunter.blurb;
 
@@ -161,7 +161,7 @@ export default function StatusScreen() {
               )}
             </View>
             <View className="mt-1">
-              <RankBadge rank={rank} />
+              <LevelBadge level={level} />
             </View>
             <Text className="mt-1 text-xs text-mute">已出動 {completed} 次・{blurb}</Text>
           </View>

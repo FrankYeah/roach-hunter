@@ -1,13 +1,14 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LevelBadge } from '@/components/level-badge';
 import { MosaicTarget } from '@/components/mosaic-target';
-import { TARGET_TIERS } from '@/constants/brand';
+import { TARGET_TIERS, levelFromCompleted, nextLevel } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { PLATFORM_FEE_RATE, SOS_TASKS, netEarning, tierOf, type SosTask } from '@/data/tasks';
 import { safeDistanceMeters } from '@/lib/geo';
@@ -19,9 +20,12 @@ import {
   tierIdFromSize,
   type OrderRow,
 } from '@/lib/orders';
-import { ensureProfile } from '@/lib/profiles';
+import { ensureProfile, fetchProfile, type Profile } from '@/lib/profiles';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore, type LatLng } from '@/store/useAppStore';
+
+/** 派單延遲：未完整認證的獵人，未指定等級的單延後此毫秒數才出現 */
+const DISPATCH_DELAY_MS = 3000;
 
 interface PoolItem {
   id: string;
@@ -136,6 +140,8 @@ export default function HunterPoolScreen() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(configured);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [myProfile, setMyProfile] = useState<Profile | null>(null);
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
   const refresh = useCallback(async () => {
     const data = await fetchOpenOrders();
@@ -155,6 +161,63 @@ export default function HunterPoolScreen() {
   useEffect(() => {
     if (userId) ensureProfile(userId, 'hunter');
   }, [userId]);
+
+  // 每次回到任務池都重抓自己的 profile（等級 / 性別 / 認證可能在設定頁改過）
+  useFocusEffect(
+    useCallback(() => {
+      if (!configured || !userId) return;
+      let active = true;
+      fetchProfile(userId).then((p) => active && setMyProfile(p));
+      return () => {
+        active = false;
+      };
+    }, [configured, userId]),
+  );
+
+  // ── 等級 / 認證 ──────────────────────────────
+  const myCompleted = myProfile?.completed_tasks ?? 0;
+  const myLevel = levelFromCompleted(myCompleted);
+  const myGender = myProfile?.gender ?? 'unspecified';
+  const fullyVerified = !!myProfile?.id_verified && !!myProfile?.police_verified;
+  const next = nextLevel(myCompleted);
+  const toNext = next ? Math.max(0, next.minCompleted - myCompleted) : 0;
+  const levelProgress = next
+    ? Math.min(100, Math.round(((myCompleted - myLevel.minCompleted) / (next.minCompleted - myLevel.minCompleted)) * 100))
+    : 100;
+
+  // ── 派單過濾：符合自己等級 + 發案者性別要求 ─────
+  const eligible = useMemo(
+    () =>
+      orders.filter((o) => {
+        if ((o.min_completed ?? 0) > myCompleted) return false; // 等級不足
+        const pref = o.gender_pref ?? 'any';
+        if (pref !== 'any' && pref !== myGender) return false; // 性別不符
+        return true;
+      }),
+    [orders, myCompleted, myGender],
+  );
+
+  // ── 優先派單：未完整認證者，未指定等級的單延遲 3 秒才顯示 ──
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    eligible.forEach((o) => {
+      const delayed = !fullyVerified && (o.min_completed ?? 0) === 0;
+      if (delayed) {
+        timers.push(
+          setTimeout(
+            () => setRevealed((p) => (p.has(o.id) ? p : new Set(p).add(o.id))),
+            DISPATCH_DELAY_MS,
+          ),
+        );
+      } else {
+        setRevealed((p) => (p.has(o.id) ? p : new Set(p).add(o.id)));
+      }
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [eligible, fullyVerified]);
+
+  const visibleOrders = eligible.filter((o) => revealed.has(o.id));
+  const pendingCount = eligible.length - visibleOrders.length;
 
   const backToRequester = () => {
     selectHaptic();
@@ -188,7 +251,7 @@ export default function HunterPoolScreen() {
   };
 
   const items: PoolItem[] = configured
-    ? orders.map((o) => itemFromOrder(o, userLocation))
+    ? visibleOrders.map((o) => itemFromOrder(o, userLocation))
     : SOS_TASKS.map(itemFromTask);
 
   return (
@@ -203,7 +266,7 @@ export default function HunterPoolScreen() {
               <Text className="text-[11px] font-bold text-leaf">上線中</Text>
             </View>
           </View>
-          <Text className="mt-0.5 text-xs text-mute">附近有 {items.length} 筆呼救等你出動・拖鞋見習生</Text>
+          <Text className="mt-0.5 text-xs text-mute">附近有 {items.length} 筆呼救等你出動・{myLevel.name}</Text>
         </View>
         <View className="flex-row items-center">
           <Pressable
@@ -229,6 +292,59 @@ export default function HunterPoolScreen() {
       </View>
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+        {/* 等級面板 */}
+        {configured && (
+          <View className="mb-4 rounded-3xl bg-white p-4" style={shadowSoft}>
+            <View className="flex-row items-center justify-between">
+              <View className="flex-row items-center">
+                <LevelBadge level={myLevel} size="md" />
+                <Text className="ml-2 text-xs text-mute">已完成 {myCompleted} 趟</Text>
+              </View>
+              {fullyVerified ? (
+                <View className="flex-row items-center rounded-full bg-silver-light px-2.5 py-1">
+                  <MaterialCommunityIcons name="shield-check" size={12} color="#969DA9" />
+                  <Text className="ml-1 text-[11px] font-bold text-silver-dark">完整認證・優先派單</Text>
+                </View>
+              ) : (
+                <Pressable
+                  onPress={() => router.push('/hunter/profile')}
+                  accessibilityRole="button"
+                  accessibilityLabel="前往完成認證"
+                  hitSlop={8}
+                >
+                  <Text className="text-[11px] font-bold text-sos">完成認證享優先 →</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {next ? (
+              <>
+                <View className="mt-3 h-2 overflow-hidden rounded-full bg-wood-100">
+                  <View className="h-2 rounded-full bg-silver" style={{ width: `${levelProgress}%` }} />
+                </View>
+                <Text className="mt-1.5 text-[11px] text-mute">
+                  距離「{next.name}」還差 <Text className="font-bold text-ink">{toNext}</Text> 趟任務
+                </Text>
+              </>
+            ) : (
+              <View className="mt-3 flex-row items-center">
+                <MaterialCommunityIcons name="crown" size={14} color="#969DA9" />
+                <Text className="ml-1 text-[11px] font-bold text-silver-dark">已達最高等級・滅蟑大師</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* 未完整認證：被延後的任務提示 */}
+        {configured && !fullyVerified && pendingCount > 0 && (
+          <View className="mb-3 flex-row items-center rounded-2xl bg-wood-50 px-3 py-2.5">
+            <Ionicons name="time-outline" size={14} color="#9A763C" />
+            <Text className="ml-1.5 flex-1 text-[11px] text-wood-600">
+              有 {pendingCount} 筆新任務優先開放給完整認證的獵人，{DISPATCH_DELAY_MS / 1000} 秒後才對你顯示
+            </Text>
+          </View>
+        )}
+
         {configured && loading ? (
           <View className="mt-16 items-center">
             <ActivityIndicator color="#FB6B4B" />

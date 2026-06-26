@@ -19,8 +19,14 @@ export interface OrderRow {
   hunter_lat: number | null;
   hunter_lng: number | null;
   price: number | null;
+  /** 求救者的進階篩選條件 */
+  gender_pref: GenderPref;
+  min_completed: number;
   created_at: string;
 }
+
+/** 性別偏好：不拘 / 限男性 / 限女性 */
+export type GenderPref = 'any' | 'male' | 'female';
 
 /** tier id → DB target_size 短碼（對應 SQL 的 CHECK 限制）*/
 const TARGET_SIZE: Record<TargetTier['id'], OrderRow['target_size']> = {
@@ -40,6 +46,8 @@ export interface CreateOrderInput {
   price: number;
   lat: number | null;
   lng: number | null;
+  genderPref: GenderPref;
+  minCompleted: number;
 }
 
 /** 建立呼救訂單並寫入 Supabase。未設定 Supabase 時回傳 null（mock 後備）。*/
@@ -56,6 +64,8 @@ export async function createOrder(
       location_lat: input.lat,
       location_lng: input.lng,
       price: input.price,
+      gender_pref: input.genderPref,
+      min_completed: input.minCompleted,
     })
     .select('id')
     .single();

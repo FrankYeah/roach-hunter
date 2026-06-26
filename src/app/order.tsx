@@ -6,12 +6,31 @@ import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
-import { ADDONS, BRAND, CHASE_FEE, TARGET_TIERS, type TargetTier } from '@/constants/brand';
+import {
+  ADDONS,
+  BRAND,
+  CHASE_FEE,
+  HUNTER_LEVELS,
+  TARGET_TIERS,
+  type HunterLevelId,
+  type TargetTier,
+} from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { CURRENT_USER } from '@/data/hunters';
 import { isValidLatLng } from '@/lib/geo';
-import { createOrder } from '@/lib/orders';
+import { createOrder, type GenderPref } from '@/lib/orders';
 import { useAppStore } from '@/store/useAppStore';
+
+const GENDER_OPTIONS: { id: GenderPref; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { id: 'any', label: '不拘', icon: 'people-outline' },
+  { id: 'male', label: '限男性', icon: 'male' },
+  { id: 'female', label: '限女性', icon: 'female' },
+];
+
+/** 等級要求的說明文案 */
+function levelHint(minCompleted: number): string {
+  return minCompleted === 0 ? '新手或不拘・接受 0 次經驗' : `需累積 ${minCompleted} 次以上任務`;
+}
 
 /** 現場狀況選項卡 */
 function TierCard({
@@ -67,10 +86,14 @@ function TierCard({
 export default function OrderScreen() {
   const [tierId, setTierId] = useState<TargetTier['id']>('big');
   const [addonIds, setAddonIds] = useState<string[]>([]);
+  const [genderPref, setGenderPref] = useState<GenderPref>('any');
+  const [levelId, setLevelId] = useState<HunterLevelId>('rookie');
 
   const tier = TARGET_TIERS.find((t) => t.id === tierId)!;
+  const level = HUNTER_LEVELS.find((l) => l.id === levelId)!;
   const addonTotal = ADDONS.filter((a) => addonIds.includes(a.id)).reduce((s, a) => s + a.price, 0);
-  const total = tier.price + addonTotal;
+  // 動態總價：基礎(大小) + 加購 + 等級加價
+  const total = tier.price + addonTotal + level.surcharge;
 
   const toggleAddon = (id: string) =>
     setAddonIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -93,6 +116,8 @@ export default function OrderScreen() {
       price: total,
       lat: coords?.latitude ?? null,
       lng: coords?.longitude ?? null,
+      genderPref,
+      minCompleted: level.minCompleted,
     });
     setSubmitting(false);
     if (error) {
@@ -181,6 +206,76 @@ export default function OrderScreen() {
                   <Text className="text-xs text-mute">{a.desc}</Text>
                 </View>
                 <Text className="text-sm font-black text-ink">+${a.price}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+
+        {/* 進階篩選 */}
+        <View className="mb-3 mt-7 flex-row items-center">
+          <Ionicons name="options-outline" size={18} color="#2A2521" />
+          <Text className="ml-2 text-base font-black text-ink">進階篩選</Text>
+        </View>
+
+        {/* 性別偏好（皆不加價）*/}
+        <Text className="mb-2 text-xs font-semibold text-mute">獵人性別偏好</Text>
+        <View className="mb-5 flex-row">
+          {GENDER_OPTIONS.map((g) => {
+            const on = genderPref === g.id;
+            return (
+              <Pressable
+                key={g.id}
+                onPress={() => setGenderPref(g.id)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`性別偏好 ${g.label}`}
+                className="mr-2"
+              >
+                <View
+                  className={`flex-row items-center rounded-full border px-3.5 py-2 ${
+                    on ? 'border-sos bg-sos/10' : 'border-wood-200 bg-white'
+                  }`}
+                >
+                  <Ionicons name={g.icon} size={14} color={on ? '#FB6B4B' : '#9A8F80'} />
+                  <Text className={`ml-1.5 text-xs font-bold ${on ? 'text-sos' : 'text-ink'}`}>{g.label}</Text>
+                  <Text className={`ml-1.5 text-[10px] ${on ? 'text-sos' : 'text-mute'}`}>+$0</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* 獵人等級要求（動態加價）*/}
+        <Text className="mb-2 text-xs font-semibold text-mute">獵人等級要求</Text>
+        {HUNTER_LEVELS.map((l) => {
+          const on = levelId === l.id;
+          return (
+            <Pressable
+              key={l.id}
+              onPress={() => setLevelId(l.id)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`等級要求 ${l.name}，加價 ${l.surcharge} 元`}
+              className="mb-2.5"
+            >
+              <View
+                className={`flex-row items-center rounded-2xl border-2 px-4 py-3 ${
+                  on ? 'border-sos bg-sos/10' : 'border-wood-100 bg-white'
+                }`}
+                style={on ? undefined : shadowSoft}
+              >
+                <View
+                  className={`h-6 w-6 items-center justify-center rounded-full ${on ? 'bg-sos' : 'bg-wood-100'}`}
+                >
+                  {on && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                </View>
+                <View className="ml-3 flex-1">
+                  <Text className="text-sm font-bold text-ink">{l.name}</Text>
+                  <Text className="text-xs text-mute">{levelHint(l.minCompleted)}</Text>
+                </View>
+                <Text className={`text-sm font-black ${on ? 'text-sos' : 'text-ink'}`}>
+                  {l.surcharge === 0 ? '+$0' : `+$${l.surcharge}`}
+                </Text>
               </View>
             </Pressable>
           );

@@ -8,6 +8,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import MapView, { Marker, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { FlipFlopLogo } from '@/components/flip-flop-logo';
 import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
@@ -129,9 +130,14 @@ export default function HomeScreen() {
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
       {/* 頂部品牌列 */}
       <View className="flex-row items-center justify-between px-5 pb-3 pt-1">
-        <View>
-          <Text className="text-2xl font-black text-ink">{BRAND.appName}</Text>
-          <Text className="mt-0.5 text-xs text-mute">{BRAND.tagline}</Text>
+        <View className="flex-row items-center">
+          <View className="mr-2.5 h-10 w-10 items-center justify-center rounded-2xl bg-cream" style={shadowSoft}>
+            <FlipFlopLogo size={24} color="#9A763C" />
+          </View>
+          <View>
+            <Text className="text-2xl font-black text-ink">{BRAND.appName}</Text>
+            <Text className="mt-0.5 text-xs text-mute">{BRAND.tagline}</Text>
+          </View>
         </View>
         {/* 點頭像即可切換為「獵人」身分 */}
         <Pressable

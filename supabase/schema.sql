@@ -14,6 +14,9 @@ create table if not exists public.orders (
   hunter_lat    double precision,
   hunter_lng    double precision,
   price         integer,
+  -- 求救者的進階篩選：性別偏好 + 最低經驗（completed_tasks）要求
+  gender_pref   text not null default 'any' check (gender_pref in ('any', 'male', 'female')),
+  min_completed integer not null default 0,
   created_at    timestamptz not null default now()
 );
 
@@ -72,6 +75,10 @@ create table if not exists public.profiles (
   avatar_url      text,
   rating          numeric not null default 5.0,
   completed_tasks integer not null default 0,
+  -- 第七階段：性別 + 認證狀態
+  gender          text not null default 'unspecified' check (gender in ('male', 'female', 'unspecified')),
+  id_verified     boolean not null default false,
+  police_verified boolean not null default false,
   updated_at      timestamptz not null default now()
 );
 
@@ -96,3 +103,22 @@ create policy "users update own profile"
   to authenticated
   using (auth.uid() = id)
   with check (auth.uid() = id);
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第七階段：進階定價 / 等級 / 認證（既有資料表補欄位，idempotent） ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+-- orders：求救者進階篩選
+alter table public.orders add column if not exists gender_pref text not null default 'any';
+alter table public.orders drop constraint if exists orders_gender_pref_check;
+alter table public.orders add constraint orders_gender_pref_check
+  check (gender_pref in ('any', 'male', 'female'));
+alter table public.orders add column if not exists min_completed integer not null default 0;
+
+-- profiles：性別 + 認證
+alter table public.profiles add column if not exists gender text not null default 'unspecified';
+alter table public.profiles drop constraint if exists profiles_gender_check;
+alter table public.profiles add constraint profiles_gender_check
+  check (gender in ('male', 'female', 'unspecified'));
+alter table public.profiles add column if not exists id_verified boolean not null default false;
+alter table public.profiles add column if not exists police_verified boolean not null default false;

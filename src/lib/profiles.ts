@@ -1,6 +1,8 @@
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { type Role } from '@/store/useAppStore';
 
+export type Gender = 'male' | 'female' | 'unspecified';
+
 /** 對應 SQL 的 public.profiles 一列 */
 export interface Profile {
   id: string;
@@ -8,6 +10,9 @@ export interface Profile {
   avatar_url: string | null;
   rating: number;
   completed_tasks: number;
+  gender: Gender;
+  id_verified: boolean;
+  police_verified: boolean;
 }
 
 /** 兩種身分的預設名稱（也用來判斷名稱是否「仍是未自訂的預設值」）*/
@@ -17,13 +22,16 @@ export const DEFAULT_NAMES: Record<Role, string> = {
 };
 const ALL_DEFAULTS = Object.values(DEFAULT_NAMES);
 
-/** numeric 欄位可能以字串回傳，統一轉成 number */
+/** numeric 欄位可能以字串回傳，統一轉成 number；新欄位給安全預設 */
 function mapRow(data: {
   id: string;
   display_name: string;
   avatar_url: string | null;
   rating: number | string;
   completed_tasks: number | string;
+  gender?: Gender | null;
+  id_verified?: boolean | null;
+  police_verified?: boolean | null;
 }): Profile {
   return {
     id: data.id,
@@ -31,6 +39,9 @@ function mapRow(data: {
     avatar_url: data.avatar_url ?? null,
     rating: Number(data.rating),
     completed_tasks: Number(data.completed_tasks),
+    gender: data.gender ?? 'unspecified',
+    id_verified: data.id_verified ?? false,
+    police_verified: data.police_verified ?? false,
   };
 }
 
@@ -64,8 +75,29 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
   if (!isSupabaseConfigured || !supabase || !userId) return null;
   const { data } = await supabase
     .from('profiles')
-    .select('id, display_name, avatar_url, rating, completed_tasks')
+    .select('id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified')
     .eq('id', userId)
     .maybeSingle();
   return data ? mapRow(data) : null;
+}
+
+/** 更新自己的 profile（性別 / 認證狀態等）。未設定或欄位未遷移時靜默忽略。*/
+export async function updateProfile(
+  userId: string | null,
+  patch: Partial<Pick<Profile, 'display_name' | 'gender' | 'id_verified' | 'police_verified'>>,
+): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || !userId) return;
+  await supabase.from('profiles').update(patch).eq('id', userId);
+}
+
+/** 完成任務後將自己的 completed_tasks +1（read-modify-write，MVP 夠用）*/
+export async function bumpCompletedTasks(userId: string | null): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || !userId) return;
+  const { data } = await supabase
+    .from('profiles')
+    .select('completed_tasks')
+    .eq('id', userId)
+    .maybeSingle();
+  const current = data ? Number(data.completed_tasks) : 0;
+  await supabase.from('profiles').update({ completed_tasks: current + 1 }).eq('id', userId);
 }

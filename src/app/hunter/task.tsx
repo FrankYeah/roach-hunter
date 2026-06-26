@@ -11,7 +11,7 @@ import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
 import { completeOrderDb, tierIdFromSize } from '@/lib/orders';
-import { fetchProfile, type Profile } from '@/lib/profiles';
+import { bumpCompletedTasks, fetchProfile, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
 const QUICK_REPLIES = ['我出發了，5 分鐘到', '請先別激怒牠 🙏', '門口到了，幫我開門', '收工！已解決 ✌️'];
@@ -26,6 +26,7 @@ export default function HunterTaskScreen() {
   const acceptedOrder = useAppStore((s) => s.acceptedOrder);
   const acceptedTaskId = useAppStore((s) => s.acceptedTaskId);
   const userLocation = useAppStore((s) => s.userLocation);
+  const userId = useAppStore((s) => s.userId);
   const finishTask = useAppStore((s) => s.finishTask);
 
   // 真實模式用搶到的訂單；否則退回 mock 任務
@@ -78,7 +79,10 @@ export default function HunterTaskScreen() {
 
   const complete = () => {
     successHaptic();
-    if (acceptedOrder) completeOrderDb(acceptedOrder.id); // 真實模式：標記完成
+    if (acceptedOrder) {
+      completeOrderDb(acceptedOrder.id); // 真實模式：標記完成
+      bumpCompletedTasks(userId); // 完成數 +1 → 推進等級
+    }
     finishTask();
     router.replace('/hunter');
   };

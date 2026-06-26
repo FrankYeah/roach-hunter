@@ -12,30 +12,50 @@ export const BRAND = {
   requesterTitle: '鎮宅金主',
 } as const;
 
-/** 獵人等級稱號（由低到高） */
+/** 獵人等級稱號（由低到高，沿用作 mock 資料的稱號型別） */
 export const HUNTER_RANKS = ['拖鞋見習生', '捲報紙達人', '白金殺手'] as const;
 export type HunterRank = (typeof HUNTER_RANKS)[number];
 
-/** 由完成任務數推導獵人等級（真實 profile 沒有 rank 欄位，用此換算）*/
-export function rankFromCompleted(completed: number): HunterRank {
-  if (completed >= 200) return '白金殺手';
-  if (completed >= 50) return '捲報紙達人';
-  return '拖鞋見習生';
-}
+/**
+ * 經驗等級（依完成任務數）。同一份定義同時驅動三件事：
+ *  1) 求救端「獵人等級要求」的動態加價
+ *  2) 獵人首頁的等級面板 / 升級進度
+ *  3) 任務池派單過濾（completed_tasks >= 訂單 min_completed 才看得到）
+ * 徽章質感隨等級提升，最高級「滅蟑大師」採金屬銀。
+ */
+export type HunterLevelId = 'rookie' | 'skilled' | 'veteran' | 'master';
 
-/** 各等級對應的視覺強調樣式（白金殺手＝金屬銀徽章） */
-export interface RankStyle {
+export interface HunterLevel {
+  id: HunterLevelId;
+  name: string;
+  /** 達到此級所需的最少完成任務數 */
+  minCompleted: number;
+  /** 求救端指定「至少此級」時的加價（新台幣）*/
+  surcharge: number;
+  /** 徽章底色 / 文字色（Tailwind class）+ icon（MaterialCommunityIcons）*/
   badge: string;
   text: string;
-  /** MaterialCommunityIcons 名稱 */
   icon: string;
 }
 
-export const RANK_STYLE: Record<HunterRank, RankStyle> = {
-  拖鞋見習生: { badge: 'bg-wood-100', text: 'text-wood-600', icon: 'shoe-sneaker' },
-  捲報紙達人: { badge: 'bg-wood-300', text: 'text-ink', icon: 'newspaper-variant-outline' },
-  白金殺手: { badge: 'bg-silver-light', text: 'text-silver-dark', icon: 'medal-outline' },
-};
+export const HUNTER_LEVELS: HunterLevel[] = [
+  { id: 'rookie', name: '新手', minCompleted: 0, surcharge: 0, badge: 'bg-wood-100', text: 'text-wood-600', icon: 'shoe-sneaker' },
+  { id: 'skilled', name: '熟手', minCompleted: 1, surcharge: 30, badge: 'bg-wood-300', text: 'text-ink', icon: 'shoe-print' },
+  { id: 'veteran', name: '老手', minCompleted: 5, surcharge: 50, badge: 'bg-silver-light', text: 'text-silver-dark', icon: 'medal-outline' },
+  { id: 'master', name: '滅蟑大師', minCompleted: 20, surcharge: 70, badge: 'bg-silver', text: 'text-white', icon: 'crown' },
+];
+
+/** 由完成任務數推導目前等級（取符合的最高門檻）*/
+export function levelFromCompleted(completed: number): HunterLevel {
+  let lvl = HUNTER_LEVELS[0];
+  for (const l of HUNTER_LEVELS) if (completed >= l.minCompleted) lvl = l;
+  return lvl;
+}
+
+/** 下一個等級（已達頂級時為 null）*/
+export function nextLevel(completed: number): HunterLevel | null {
+  return HUNTER_LEVELS.find((l) => l.minCompleted > completed) ?? null;
+}
 
 /** 目標尺寸與指導價（單位：新台幣） */
 export interface TargetTier {
