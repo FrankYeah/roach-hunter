@@ -30,12 +30,14 @@ create index if not exists orders_client_idx on public.orders (client_id);
 alter table public.orders enable row level security;
 
 -- 求救者只能建立 client_id = 自己 的訂單
+drop policy if exists "clients insert own orders" on public.orders;
 create policy "clients insert own orders"
   on public.orders for insert
   to authenticated
   with check (auth.uid() = client_id);
 
 -- 看得到：自己發的單、尚在徵人的單(searching)、或自己接的單
+drop policy if exists "read own or open orders" on public.orders;
 create policy "read own or open orders"
   on public.orders for select
   to authenticated
@@ -46,6 +48,7 @@ create policy "read own or open orders"
   );
 
 -- 更新：自己是 client / hunter，或正在接一張 searching 的單
+drop policy if exists "update own or accepting orders" on public.orders;
 create policy "update own or accepting orders"
   on public.orders for update
   to authenticated
@@ -55,7 +58,24 @@ create policy "update own or accepting orders"
 -- ── Realtime ───────────────────────────────────────────────────────
 -- 讓前端能 subscribe 到 UPDATE；full 可讓事件帶完整列資料
 alter table public.orders replica identity full;
-alter publication supabase_realtime add table public.orders;
+
+-- 確保 realtime publication 存在（有些新專案 / 被刪過的專案會沒有），
+-- 再把 orders 加進去；已存在則略過，整段可重複執行不報錯。
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'orders'
+  ) then
+    alter publication supabase_realtime add table public.orders;
+  end if;
+end$$;
 
 -- ── 既有資料表升級 ─────────────────────────────────────────────────
 -- 若你先前已執行過「沒有 cancelled」的舊版 schema，請『補跑這段』即可：
@@ -91,18 +111,21 @@ create table if not exists public.profiles (
 alter table public.profiles enable row level security;
 
 -- 所有登入者都能讀任何人的 profile（要看到對方名稱 / 評分）
+drop policy if exists "profiles readable by authenticated" on public.profiles;
 create policy "profiles readable by authenticated"
   on public.profiles for select
   to authenticated
   using (true);
 
 -- 只能建立 id = 自己 的 profile（upsert 的 insert 分支）
+drop policy if exists "users insert own profile" on public.profiles;
 create policy "users insert own profile"
   on public.profiles for insert
   to authenticated
   with check (auth.uid() = id);
 
 -- 只能更新自己的 profile
+drop policy if exists "users update own profile" on public.profiles;
 create policy "users update own profile"
   on public.profiles for update
   to authenticated
