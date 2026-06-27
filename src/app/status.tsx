@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChatBox } from '@/components/chat-box';
 import { LevelBadge } from '@/components/level-badge';
 import { ESCAPE_FEE, levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
@@ -19,12 +20,11 @@ import { useAppStore } from '@/store/useAppStore';
 const STEPS = ['媒合成功', '獵人出發', '抵達現場', '任務完成'];
 const CURRENT_STEP = 1;
 
-const QUICK_REPLIES = ['門口在鞋櫃旁 🙏', '牠在廚房水槽！', '我先去房間躲一下', '拜託快一點 😭'];
-
 export default function StatusScreen() {
   const configured = isSupabaseConfigured;
   const matchedHunterId = useAppStore((s) => s.matchedHunterId);
   const orderId = useAppStore((s) => s.orderId);
+  const userId = useAppStore((s) => s.userId);
   const completeOrder = useAppStore((s) => s.completeOrder);
   const resetOrder = useAppStore((s) => s.resetOrder);
 
@@ -223,40 +223,11 @@ export default function StatusScreen() {
           </View>
         </View>
 
-        {/* 通訊 UI 框架：只有媒合成功（matched）後才出現 */}
+        {/* 即時聊天：只有媒合成功（matched）後才出現 */}
         {showChat && (
           <>
-            <Text className="mb-2 mt-6 text-base font-black text-ink">與獵人聯絡</Text>
-            <View className="rounded-3xl bg-cream p-3" style={shadowSoft}>
-              {/* 對方訊息 */}
-              <View className="mb-2 max-w-[80%] self-start rounded-2xl rounded-tl-md bg-white px-3 py-2">
-                <Text className="text-sm text-ink">收到！我帶傢伙馬上到，先別激怒牠 👍</Text>
-              </View>
-              {/* 我方訊息 */}
-              <View className="mb-3 max-w-[80%] self-end rounded-2xl rounded-tr-md bg-sos px-3 py-2">
-                <Text className="text-sm text-white">拜託了，牠超大隻！</Text>
-              </View>
-
-              {/* 快速回覆 */}
-              <View className="mb-3 flex-row flex-wrap">
-                {QUICK_REPLIES.map((q) => (
-                  <View key={q} className="mb-2 mr-2 rounded-full border border-wood-200 bg-white px-3 py-1.5">
-                    <Text className="text-xs text-ink">{q}</Text>
-                  </View>
-                ))}
-              </View>
-
-              {/* 輸入列（框架） */}
-              <View className="flex-row items-center rounded-full bg-white px-3 py-2">
-                <Text className="flex-1 text-sm text-mute">傳訊息給 {name}…</Text>
-                <View className="h-9 w-9 items-center justify-center rounded-full bg-wood-100">
-                  <Ionicons name="call" size={16} color="#9A763C" />
-                </View>
-                <View className="ml-2 h-9 w-9 items-center justify-center rounded-full bg-sos">
-                  <Ionicons name="send" size={15} color="#FFFFFF" />
-                </View>
-              </View>
-            </View>
+            <Text className="mb-2 mt-6 text-base font-black text-ink">與 {name} 聯絡</Text>
+            <ChatBox orderId={orderId} selfId={userId} peerName={name} />
           </>
         )}
       </ScrollView>

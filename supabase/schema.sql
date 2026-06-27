@@ -423,3 +423,116 @@ end;
 $$;
 
 grant execute on function public.submit_rating(uuid, uuid, integer) to authenticated;
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第十三階段：即時聊天 + KYC 認證狀態 + Storage（idempotent）      ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+-- ── (A) 即時聊天 messages ───────────────────────────────────────────
+create table if not exists public.messages (
+  id         uuid primary key default gen_random_uuid(),
+  order_id   uuid not null references public.orders (id) on delete cascade,
+  sender_id  uuid references auth.users (id) on delete set null,
+  content    text not null check (length(content) between 1 and 2000),
+  created_at timestamptz not null default now()
+);
+create index if not exists messages_order_idx on public.messages (order_id, created_at);
+
+alter table public.messages enable row level security;
+
+-- 讀取：只有該訂單的 client / hunter
+drop policy if exists "order parties read messages" on public.messages;
+create policy "order parties read messages"
+  on public.messages for select to authenticated
+  using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id and (o.client_id = auth.uid() or o.hunter_id = auth.uid())
+    )
+  );
+
+-- 發送：只有該訂單的 client / hunter，且 sender 必須是自己
+drop policy if exists "order parties send messages" on public.messages;
+create policy "order parties send messages"
+  on public.messages for insert to authenticated
+  with check (
+    sender_id = auth.uid()
+    and exists (
+      select 1 from public.orders o
+      where o.id = order_id and (o.client_id = auth.uid() or o.hunter_id = auth.uid())
+    )
+  );
+
+-- Realtime：讓雙方即時收到新訊息
+alter table public.messages replica identity full;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+end$$;
+
+-- ── (B) profiles：認證改為狀態字串（none / pending / verified / rejected）──
+alter table public.profiles add column if not exists id_verification_status text not null default 'none';
+alter table public.profiles drop constraint if exists profiles_id_verif_status_check;
+alter table public.profiles add constraint profiles_id_verif_status_check
+  check (id_verification_status in ('none', 'pending', 'verified', 'rejected'));
+
+alter table public.profiles add column if not exists police_verification_status text not null default 'none';
+alter table public.profiles drop constraint if exists profiles_police_verif_status_check;
+alter table public.profiles add constraint profiles_police_verif_status_check
+  check (police_verification_status in ('none', 'pending', 'verified', 'rejected'));
+
+-- 從舊布林欄位遷移既有資料（true → verified）。欄位還在才跑，避免新庫報錯。
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'id_verified'
+  ) then
+    update public.profiles set id_verification_status = 'verified'
+      where id_verification_status = 'none' and coalesce(id_verified, false) = true;
+  end if;
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'police_verified'
+  ) then
+    update public.profiles set police_verification_status = 'verified'
+      where police_verification_status = 'none' and coalesce(police_verified, false) = true;
+  end if;
+end$$;
+
+-- ── (C) Storage：KYC 文件桶 verifications（私有）+ Policy ───────────
+-- 建桶（私有，非公開）。已存在則略過。
+insert into storage.buckets (id, name, public)
+values ('verifications', 'verifications', false)
+on conflict (id) do nothing;
+
+-- 上傳：只能寫進「以自己 uid 為名的資料夾」（path 第一段 = auth.uid()）
+drop policy if exists "verif upload own" on storage.objects;
+create policy "verif upload own"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'verifications' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- 覆蓋自己的檔案（被退件後重新上傳）
+drop policy if exists "verif update own" on storage.objects;
+create policy "verif update own"
+  on storage.objects for update to authenticated
+  using (
+    bucket_id = 'verifications' and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'verifications' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- 讀取：僅限登入者（平台審核人員用；非公開）
+drop policy if exists "verif read authenticated" on storage.objects;
+create policy "verif read authenticated"
+  on storage.objects for select to authenticated
+  using (bucket_id = 'verifications');

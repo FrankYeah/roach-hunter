@@ -64,21 +64,22 @@ export default function HistoryScreen() {
     };
   }, [userId]);
 
-  // 錢包異動明細：目前唯一會動到儲值金的事件就是「撲空結算」，故由 escaped 訂單推導。
-  const walletEntries = orders
-    .filter((o) => o.status === 'escaped')
-    .map((o) => {
-      const asClient = o.client_id === userId;
-      const amount = asClient ? Math.max((o.price ?? 0) - ESCAPE_FEE, 0) : ESCAPE_FEE;
-      return {
-        id: o.id,
-        label: asClient ? '撲空退款入帳' : '撲空車馬費入帳',
-        sub: asClient ? '目標逃逸・差額退回儲值金' : '目標逃逸・固定車馬費',
-        amount,
-        date: o.created_at,
-      };
-    })
-    .filter((e) => e.amount > 0);
+  // 錢包異動明細：唯一動到儲值金的事件是「撲空結算」。同一帳號可能在某單是 hunter
+  // （+車馬費）、在另一單是 client（+退款），故逐筆依各自角色分別產生條目。
+  const walletEntries = orders.flatMap((o) => {
+    if (o.status !== 'escaped') return [];
+    const out: { id: string; label: string; sub: string; amount: number; date: string }[] = [];
+    if (o.hunter_id === userId) {
+      out.push({ id: `${o.id}:fee`, label: '撲空車馬費入帳', sub: '目標逃逸・固定車馬費', amount: ESCAPE_FEE, date: o.created_at });
+    }
+    if (o.client_id === userId) {
+      const refund = Math.max((o.price ?? 0) - ESCAPE_FEE, 0);
+      if (refund > 0) {
+        out.push({ id: `${o.id}:refund`, label: '撲空退款入帳', sub: '目標逃逸・差額退回儲值金', amount: refund, date: o.created_at });
+      }
+    }
+    return out;
+  });
 
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
@@ -147,21 +148,25 @@ export default function HistoryScreen() {
             </View>
           ) : (
             orders.map((o) => {
-              const asClient = o.client_id === userId;
+              // 視角優先序：我是這張單的 hunter → 收入視角（正數，扣 15% 平台費後）；
+              // 否則才是求救者的扣款視角（負數）。撲空一律 $150 車馬費。
+              const asHunter = o.hunter_id === userId;
               const meta = STATUS_META[o.status];
-              const cpId = asClient ? o.hunter_id : o.client_id;
-              const cpName = cpId ? names[cpId]?.display_name ?? '對方' : asClient ? '尚未媒合' : '求救者';
+              const cpId = asHunter ? o.client_id : o.hunter_id;
+              const cpName = cpId ? names[cpId]?.display_name ?? '對方' : asHunter ? '求救者' : '尚未媒合';
               const price = o.price ?? 0;
-              const spent = o.status === 'escaped' ? ESCAPE_FEE : o.status === 'cancelled' ? 0 : price;
               const earned = o.status === 'escaped' ? ESCAPE_FEE : o.status === 'cancelled' ? 0 : netEarning(price);
+              const spent = o.status === 'escaped' ? ESCAPE_FEE : o.status === 'cancelled' ? 0 : price;
+              const amountTag =
+                o.status === 'escaped' ? '車馬費' : o.status === 'cancelled' ? '已取消' : asHunter ? '淨收益' : '花費';
               return (
                 <View key={o.id} className="mb-3 rounded-3xl bg-white p-4" style={shadowSoft}>
                   <View className="flex-row items-center justify-between">
                     <View className="flex-row items-center">
-                      {/* 身分標籤：求救 / 出動 */}
-                      <View className={`rounded-full px-2 py-0.5 ${asClient ? 'bg-sos/10' : 'bg-leaf/15'}`}>
-                        <Text className={`text-[11px] font-black ${asClient ? 'text-sos' : 'text-leaf'}`}>
-                          {asClient ? '求救' : '出動'}
+                      {/* 身分標籤：出動（獵人）/ 求救（求救者）*/}
+                      <View className={`rounded-full px-2 py-0.5 ${asHunter ? 'bg-leaf/15' : 'bg-sos/10'}`}>
+                        <Text className={`text-[11px] font-black ${asHunter ? 'text-leaf' : 'text-sos'}`}>
+                          {asHunter ? '出動' : '求救'}
                         </Text>
                       </View>
                       <Text className="ml-2 text-[11px] text-mute">{formatDate(o.created_at)}</Text>
@@ -181,17 +186,17 @@ export default function HistoryScreen() {
                         {sizeLabel(o.target_size)}的目標
                       </Text>
                       <View className="mt-0.5 flex-row items-center">
-                        <Ionicons name={asClient ? 'walk' : 'home'} size={11} color="#9A8F80" />
+                        <Ionicons name={asHunter ? 'home' : 'walk'} size={11} color="#9A8F80" />
                         <Text className="ml-1 text-xs text-mute">
-                          {asClient ? '獵人' : '求救者'}：{cpName}
+                          {asHunter ? '求救者' : '獵人'}：{cpName}
                         </Text>
                       </View>
                     </View>
                     <View className="items-end">
-                      <Text className={`text-lg font-black ${asClient ? 'text-ink' : 'text-leaf'}`}>
-                        {asClient ? `-$${spent}` : `+$${earned}`}
+                      <Text className={`text-lg font-black ${asHunter ? 'text-leaf' : 'text-ink'}`}>
+                        {asHunter ? `+$${earned}` : `-$${spent}`}
                       </Text>
-                      <Text className="text-[10px] text-mute">{asClient ? '花費' : '淨賺取'}</Text>
+                      <Text className="text-[10px] text-mute">{amountTag}</Text>
                     </View>
                   </View>
                 </View>

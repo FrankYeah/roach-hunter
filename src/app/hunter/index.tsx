@@ -196,7 +196,7 @@ export default function HunterPoolScreen() {
   const myCompleted = myProfile?.completed_tasks ?? 0;
   const myLevel = levelFromCompleted(myCompleted);
   const myGender = myProfile?.gender ?? 'unspecified';
-  const fullyVerified = !!myProfile?.id_verified && !!myProfile?.police_verified;
+  const fullyVerified = myProfile?.id_verification_status === 'verified';
   const searchRadiusKm = myProfile?.search_radius_km ?? 2; // 拖鞋仙人可自訂，其餘預設 2km
   const next = nextLevel(myCompleted);
   const toNext = next ? Math.max(0, next.minCompleted - myCompleted) : 0;

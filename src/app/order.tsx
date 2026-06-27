@@ -134,9 +134,11 @@ export default function OrderScreen() {
   }, [userId]);
   const hasBase = !!baseLocation;
 
-  const canSubmit = exactAddress.trim().length > 0;
-  // 完整地址 = 模糊基底 + 精確門牌；沒設基底時就用使用者輸入的完整地址
-  const composedAddress = hasBase ? `${baseLocation} ${exactAddress.trim()}` : exactAddress.trim();
+  const exact = exactAddress.trim();
+  // 有地址基底 → 精確門牌變「選填」（留空就用基底）；沒基底才強制輸入完整地址。
+  const canSubmit = hasBase || exact.length > 0;
+  // 完整地址 = 基底 +（有填才接）精確門牌；沒基底時就用使用者輸入的完整地址。
+  const composedAddress = hasBase ? `${baseLocation}${exact ? ` ${exact}` : ''}` : exact;
 
   // 按「確認呼救」：先收鍵盤，驗證地址，再開啟模擬付款過場（先付款後派單）。
   // 按鈕本身永遠可按（不再被 disabled / 非同步狀態鎖死）→ 沒填地址就跳提示，
@@ -237,21 +239,25 @@ export default function OrderScreen() {
           </View>
         </Pressable>
 
-        {/* 精確地址（必填）+ 進入指引（選填）*/}
-        <Text className="mb-2 text-base font-black text-ink">{hasBase ? '補上精確門牌' : '確認精確地址'}</Text>
+        {/* 精確地址（有基底時為選填）+ 進入指引（選填）*/}
+        <Text className="mb-2 text-base font-black text-ink">
+          {hasBase ? '補上精確門牌（選填）' : '確認精確地址'}
+        </Text>
         <View className="mb-2.5 rounded-2xl border-2 border-wood-100 bg-white px-4 py-3" style={shadowSoft}>
           <Text className="text-[11px] text-mute">
-            {hasBase ? '門牌・樓層（必填，獵人接單後才看得到）' : '完整地址（必填，獵人接單後才看得到）'}
+            {hasBase
+              ? '門牌・樓層（選填，留空就直接用上面的地址基底）'
+              : '完整地址（必填，獵人接單後才看得到）'}
           </Text>
           <TextInput
             value={exactAddress}
             onChangeText={setExactAddress}
-            placeholder={hasBase ? '例如：100 號 3 樓之 2' : '例如：夏日路 100 號 3 樓'}
+            placeholder={hasBase ? '例如：100 號 3 樓之 2（可留空）' : '例如：夏日路 100 號 3 樓'}
             placeholderTextColor="#C4BCB0"
-            accessibilityLabel="精確門牌地址，必填"
+            accessibilityLabel={hasBase ? '精確門牌地址，選填' : '精確門牌地址，必填'}
             className="mt-1 text-base font-bold text-ink"
           />
-          {hasBase && exactAddress.trim().length > 0 && (
+          {hasBase && (
             <Text className="mt-1.5 text-[11px] text-leaf">完整地址：{composedAddress}</Text>
           )}
         </View>

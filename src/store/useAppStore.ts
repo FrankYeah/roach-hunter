@@ -62,10 +62,6 @@ interface AppState {
   setAuthReady: (v: boolean) => void;
   applySession: (session: AuthSessionLike) => void;
   setUserLocation: (loc: LatLng | null) => void;
-
-  // ── 獵人實名認證 ───────────────────────────
-  verification: { idFront: boolean; idBack: boolean; police: boolean };
-  setVerificationDoc: (key: 'idFront' | 'idBack' | 'police', value: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -105,8 +101,4 @@ export const useAppStore = create<AppState>((set) => ({
       phone: session?.user?.phone ? `+${session.user.phone}` : null,
     }),
   setUserLocation: (loc) => set({ userLocation: loc }),
-
-  verification: { idFront: false, idBack: false, police: false },
-  setVerificationDoc: (key, value) =>
-    set((s) => ({ verification: { ...s.verification, [key]: value } })),
 }));

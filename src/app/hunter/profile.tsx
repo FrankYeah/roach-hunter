@@ -1,9 +1,10 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/level-badge';
@@ -11,7 +12,8 @@ import { levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { signOut } from '@/lib/auth';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
-import { fetchProfile, updateProfile, type Gender, type Profile } from '@/lib/profiles';
+import { fetchProfile, updateProfile, type Gender, type Profile, type VerifyStatus } from '@/lib/profiles';
+import { uploadVerificationDoc, type VerifyDoc } from '@/lib/storage';
 import { useAppStore } from '@/store/useAppStore';
 
 const GENDERS: { id: Gender; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -20,55 +22,85 @@ const GENDERS: { id: Gender; label: string; icon: keyof typeof Ionicons.glyphMap
   { id: 'unspecified', label: '不公開', icon: 'remove-circle-outline' },
 ];
 
-type DocKey = 'idFront' | 'idBack' | 'police';
-
-function UploadRow({
+/** KYC 文件列：依認證狀態決定外觀（未上傳 / 審核中鎖定 / 已通過 / 退件重傳）*/
+function DocStatusRow({
   icon,
   label,
   hint,
-  done,
+  status,
+  busy,
   onUpload,
-  onRemove,
 }: {
   icon: string;
   label: string;
   hint: string;
-  done: boolean;
+  status: VerifyStatus;
+  busy: boolean;
   onUpload: () => void;
-  onRemove: () => void;
 }) {
+  const verified = status === 'verified';
+  const pending = status === 'pending';
+  const rejected = status === 'rejected';
   return (
     <View
       className={`mb-3 flex-row items-center rounded-3xl border-2 px-4 py-3.5 ${
-        done ? 'border-leaf bg-leaf/10' : 'border-dashed border-wood-300 bg-white'
+        verified
+          ? 'border-leaf bg-leaf/10'
+          : pending
+            ? 'border-silver bg-silver-light/50'
+            : rejected
+              ? 'border-sos bg-sos/5'
+              : 'border-dashed border-wood-300 bg-white'
       }`}
-      style={done ? undefined : shadowSoft}
+      style={verified || pending ? undefined : shadowSoft}
     >
-      <View className={`h-12 w-12 items-center justify-center rounded-2xl ${done ? 'bg-leaf' : 'bg-cream'}`}>
-        {done ? (
+      <View
+        className={`h-12 w-12 items-center justify-center rounded-2xl ${
+          verified ? 'bg-leaf' : pending ? 'bg-silver' : 'bg-cream'
+        }`}
+      >
+        {verified ? (
           <Ionicons name="checkmark" size={24} color="#FFFFFF" />
+        ) : pending ? (
+          <MaterialCommunityIcons name="clock-outline" size={22} color="#FFFFFF" />
         ) : (
           <MaterialCommunityIcons name={icon as never} size={22} color="#9A763C" />
         )}
       </View>
       <View className="ml-3 flex-1">
         <Text className="text-sm font-bold text-ink">{label}</Text>
-        <Text className="text-xs text-mute">{done ? '已上傳・審核中' : hint}</Text>
+        <Text className={`text-xs ${rejected ? 'text-sos' : 'text-mute'}`}>
+          {verified
+            ? '已通過審核'
+            : pending
+              ? '平台人工審核中…約 1 個工作天'
+              : rejected
+                ? '未通過，請重新上傳'
+                : hint}
+        </Text>
       </View>
-      {done ? (
-        <Pressable onPress={onRemove} accessibilityRole="button" accessibilityLabel={`移除${label}`} hitSlop={8}>
-          <Text className="text-xs font-semibold text-sos">移除</Text>
-        </Pressable>
+      {verified ? (
+        <Ionicons name="shield-checkmark" size={20} color="#7FB069" />
+      ) : pending ? (
+        <View className="flex-row items-center rounded-full bg-white px-3 py-2">
+          <ActivityIndicator size="small" color="#9A763C" />
+          <Text className="ml-1.5 text-xs font-bold text-wood-600">審核中</Text>
+        </View>
       ) : (
         <Pressable
           onPress={onUpload}
+          disabled={busy}
           accessibilityRole="button"
           accessibilityLabel={`上傳${label}`}
-          style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.96 : 1 }] }]}
+          style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.96 : 1 }], opacity: busy ? 0.6 : 1 }]}
         >
           <View className="flex-row items-center rounded-full bg-sos px-4 py-2">
-            <Ionicons name="cloud-upload-outline" size={15} color="#FFFFFF" />
-            <Text className="ml-1 text-xs font-black text-white">上傳</Text>
+            {busy ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="cloud-upload-outline" size={15} color="#FFFFFF" />
+            )}
+            <Text className="ml-1 text-xs font-black text-white">{busy ? '上傳中' : rejected ? '重傳' : '上傳'}</Text>
           </View>
         </Pressable>
       )}
@@ -77,16 +109,16 @@ function UploadRow({
 }
 
 export default function HunterProfileScreen() {
-  const verification = useAppStore((s) => s.verification);
-  const setVerificationDoc = useAppStore((s) => s.setVerificationDoc);
   const userId = useAppStore((s) => s.userId);
-
-  const verified = verification.idFront && verification.idBack;
 
   // 讀取自己的 profile：回填等級、性別、接單半徑、與「跨裝置保留」的認證狀態
   const [profile, setProfile] = useState<Profile | null>(null);
   const [gender, setGender] = useState<Gender>('unspecified');
   const [radius, setRadius] = useState(2);
+  const [idStatus, setIdStatus] = useState<VerifyStatus>('none');
+  const [policeStatus, setPoliceStatus] = useState<VerifyStatus>('none');
+  const [uploading, setUploading] = useState<VerifyDoc | null>(null);
+
   useEffect(() => {
     if (!userId) return;
     let active = true;
@@ -95,19 +127,17 @@ export default function HunterProfileScreen() {
       setProfile(p);
       setGender(p.gender);
       setRadius(p.search_radius_km);
-      if (p.id_verified) {
-        setVerificationDoc('idFront', true);
-        setVerificationDoc('idBack', true);
-      }
-      if (p.police_verified) setVerificationDoc('police', true);
+      setIdStatus(p.id_verification_status);
+      setPoliceStatus(p.police_verification_status);
     });
     return () => {
       active = false;
     };
-  }, [userId, setVerificationDoc]);
+  }, [userId]);
 
   const level = levelFromCompleted(profile?.completed_tasks ?? 0);
   const isMaster = level.id === 'master'; // 拖鞋仙人才解鎖自訂接單範圍
+  const idVerified = idStatus === 'verified';
 
   const chooseGender = (g: Gender) => {
     selectHaptic();
@@ -122,35 +152,50 @@ export default function HunterProfileScreen() {
     updateProfile(userId, { search_radius_km: km });
   };
 
-  // 白金徽章彈入動畫
+  // 選相片 → 上傳 Storage → 狀態切「審核中(pending)」並鎖定上傳鈕
+  const pickAndUpload = async (doc: VerifyDoc) => {
+    if (uploading) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('需要相簿權限', '請允許存取相片，才能上傳實名認證文件');
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6 });
+    if (res.canceled || !res.assets?.length) return;
+
+    setUploading(doc);
+    const { error } = await uploadVerificationDoc(userId, doc, res.assets[0].uri);
+    if (error) {
+      Alert.alert('上傳失敗', error);
+      setUploading(null);
+      return;
+    }
+    // 上傳成功 → 狀態 pending（DB + 本地）
+    if (doc === 'id') {
+      await updateProfile(userId, { id_verification_status: 'pending' });
+      setIdStatus('pending');
+    } else {
+      await updateProfile(userId, { police_verification_status: 'pending' });
+      setPoliceStatus('pending');
+    }
+    setUploading(null);
+    successHaptic();
+    Alert.alert('已送出審核', '文件已上傳，平台人工審核中（約 1 個工作天）');
+  };
+
+  // 白金徽章彈入動畫（身分證件通過審核才出現）
   const reveal = useRef(new Animated.Value(0)).current;
   const wasVerified = useRef(false);
   useEffect(() => {
     Animated.spring(reveal, {
-      toValue: verified ? 1 : 0,
+      toValue: idVerified ? 1 : 0,
       friction: 6,
       tension: 70,
       useNativeDriver: true,
     }).start();
-    if (verified && !wasVerified.current) successHaptic();
-    wasVerified.current = verified;
-  }, [verified, reveal]);
-
-  // 改變某份文件狀態，並把「整體認證結果」同步寫回 profile
-  const setDoc = (key: DocKey, value: boolean) => {
-    setVerificationDoc(key, value);
-    const next = { ...verification, [key]: value };
-    updateProfile(userId, {
-      id_verified: next.idFront && next.idBack,
-      police_verified: next.police,
-    });
-  };
-
-  const upload = (key: DocKey) => {
-    selectHaptic();
-    setDoc(key, true);
-  };
-  const remove = (key: DocKey) => setDoc(key, false);
+    if (idVerified && !wasVerified.current) successHaptic();
+    wasVerified.current = idVerified;
+  }, [idVerified, reveal]);
 
   const badgeScale = reveal.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
 
@@ -178,7 +223,7 @@ export default function HunterProfileScreen() {
           <View className="ml-4 flex-1">
             <View className="flex-row items-center">
               <Text className="text-lg font-black text-ink">{profile?.display_name ?? '見習獵人'}</Text>
-              {verified && (
+              {idVerified && (
                 <MaterialCommunityIcons name="shield-check" size={16} color="#969DA9" style={{ marginLeft: 6 }} />
               )}
             </View>
@@ -300,8 +345,8 @@ export default function HunterProfileScreen() {
           </View>
         )}
 
-        {/* 白金安全徽章（認證完成才出現）*/}
-        {verified && (
+        {/* 白金安全徽章（身分證件通過審核才出現）*/}
+        {idVerified && (
           <Animated.View
             className="mt-4 overflow-hidden rounded-[28px] bg-silver p-5"
             style={[{ transform: [{ scale: badgeScale }], opacity: reveal }, shadowSoft]}
@@ -313,7 +358,7 @@ export default function HunterProfileScreen() {
               <View className="ml-4 flex-1">
                 <Text className="text-xl font-black text-white">白金安全徽章</Text>
                 <Text className="mt-0.5 text-xs font-semibold text-silver-light">
-                  已通過實名驗證{verification.police ? '・含良民證' : ''}，金主更安心
+                  已通過實名驗證{policeStatus === 'verified' ? '・含良民證' : ''}，金主更安心
                 </Text>
               </View>
             </View>
@@ -326,24 +371,16 @@ export default function HunterProfileScreen() {
           <Text className="ml-2 text-base font-black text-ink">實名與安全認證</Text>
         </View>
         <Text className="mb-4 text-xs text-mute">
-          上傳身分證正反面完成實名，即可解鎖白金安全徽章。良民證為加分項，能接更高單價任務。
+          上傳身分證件完成實名，平台人工審核通過即解鎖白金安全徽章。良民證為加分項，能接更高單價任務。
         </Text>
 
-        <UploadRow
+        <DocStatusRow
           icon="card-account-details"
-          label="身分證・正面"
-          hint="請確保四角清晰、字跡可辨識"
-          done={verification.idFront}
-          onUpload={() => upload('idFront')}
-          onRemove={() => remove('idFront')}
-        />
-        <UploadRow
-          icon="card-account-details-outline"
-          label="身分證・反面"
-          hint="需顯示完整地址與發證資訊"
-          done={verification.idBack}
-          onUpload={() => upload('idBack')}
-          onRemove={() => remove('idBack')}
+          label="身分證件"
+          hint="請上傳清晰的身分證照片"
+          status={idStatus}
+          busy={uploading === 'id'}
+          onUpload={() => pickAndUpload('id')}
         />
 
         <View className="mb-2 mt-4 flex-row items-center">
@@ -352,20 +389,20 @@ export default function HunterProfileScreen() {
             <Text className="text-[10px] font-bold text-silver-dark">選填・加分</Text>
           </View>
         </View>
-        <UploadRow
+        <DocStatusRow
           icon="file-certificate-outline"
           label="警察刑事紀錄證明"
           hint="可大幅提升金主信任與接單機會"
-          done={verification.police}
-          onUpload={() => upload('police')}
-          onRemove={() => remove('police')}
+          status={policeStatus}
+          busy={uploading === 'police'}
+          onUpload={() => pickAndUpload('police')}
         />
 
-        {!verified && (
+        {idStatus !== 'verified' && (
           <View className="mt-2 flex-row items-start rounded-2xl border border-wood-200 bg-wood-50 px-4 py-3">
             <MaterialCommunityIcons name="information-outline" size={16} color="#9A763C" />
             <Text className="ml-2 flex-1 text-xs leading-5 text-wood-600">
-              完成身分證正反面上傳後，系統會在 1 個工作天內審核，通過即頒發白金安全徽章。
+              上傳後系統會在 1 個工作天內由平台人工審核，通過即頒發白金安全徽章並享優先派單。
             </Text>
           </View>
         )}

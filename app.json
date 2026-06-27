@@ -40,6 +40,12 @@
         {
           "locationWhenInUsePermission": "「那個，出現了！」需要你的位置，才能在地圖上顯示你家與附近的獵人。"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "「那個，出現了！」需要存取你的相片，以上傳實名認證文件。"
+        }
       ]
     ],
     "experiments": {

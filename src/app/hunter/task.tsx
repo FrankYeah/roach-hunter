@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChatBox } from '@/components/chat-box';
 import { ESCAPE_FEE, TARGET_TIERS } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
@@ -20,8 +21,6 @@ import {
 } from '@/lib/orders';
 import { bumpCompletedTasks, fetchProfile, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
-
-const QUICK_REPLIES = ['我出發了，5 分鐘到', '請先別激怒牠 🙏', '門口到了，幫我開門', '收工！已解決 ✌️'];
 
 function mmss(total: number) {
   const m = Math.floor(total / 60);
@@ -218,34 +217,9 @@ export default function HunterTaskScreen() {
           ) : null}
         </View>
 
-        {/* 與求救者對話 */}
+        {/* 與求救者即時聊天 */}
         <Text className="mb-2 mt-6 text-base font-black text-ink">與 {clientName} 聯絡</Text>
-        <View className="rounded-3xl bg-cream p-3" style={shadowSoft}>
-          <View className="mb-2 max-w-[80%] self-start rounded-2xl rounded-tl-md bg-white px-3 py-2">
-            <Text className="text-sm text-ink">獵人你好！牠在{tier.label === '會飛的' ? '天花板' : '角落'}，拜託小心 🙏</Text>
-          </View>
-          <View className="mb-3 max-w-[80%] self-end rounded-2xl rounded-tr-md bg-sos px-3 py-2">
-            <Text className="text-sm text-white">收到，馬上到，準備好拖鞋了 🩴</Text>
-          </View>
-
-          <View className="mb-3 flex-row flex-wrap">
-            {QUICK_REPLIES.map((q) => (
-              <View key={q} className="mb-2 mr-2 rounded-full border border-wood-200 bg-white px-3 py-1.5">
-                <Text className="text-xs text-ink">{q}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View className="flex-row items-center rounded-full bg-white px-3 py-2">
-            <Text className="flex-1 text-sm text-mute">傳訊息給金主…</Text>
-            <View className="h-9 w-9 items-center justify-center rounded-full bg-wood-100">
-              <Ionicons name="call" size={16} color="#9A763C" />
-            </View>
-            <View className="ml-2 h-9 w-9 items-center justify-center rounded-full bg-sos">
-              <Ionicons name="send" size={15} color="#FFFFFF" />
-            </View>
-          </View>
-        </View>
+        <ChatBox orderId={acceptedOrder?.id ?? null} selfId={userId} peerName={clientName} />
       </ScrollView>
 
       {/* 底部：完成任務 / 目標逃逸 */}

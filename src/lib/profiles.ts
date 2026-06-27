@@ -3,6 +3,9 @@ import { type Role } from '@/store/useAppStore';
 
 export type Gender = 'male' | 'female' | 'unspecified';
 
+/** KYC 認證狀態（取代舊的布林值）：未上傳 / 審核中 / 已通過 / 已退件 */
+export type VerifyStatus = 'none' | 'pending' | 'verified' | 'rejected';
+
 /** 對應 SQL 的 public.profiles 一列 */
 export interface Profile {
   id: string;
@@ -11,8 +14,10 @@ export interface Profile {
   rating: number;
   completed_tasks: number;
   gender: Gender;
-  id_verified: boolean;
-  police_verified: boolean;
+  /** 身分證件認證狀態（平台人工審核）*/
+  id_verification_status: VerifyStatus;
+  /** 良民證認證狀態（選填加分）*/
+  police_verification_status: VerifyStatus;
   /** 獵人自訂接單半徑（公里）。高階特權，預設 2。*/
   search_radius_km: number;
   /** 求救者預存的模糊地址基底（如「夏日公寓」/「安樂區XX街」），發單時當地址底稿。*/
@@ -38,8 +43,8 @@ function mapRow(data: {
   rating: number | string;
   completed_tasks: number | string;
   gender?: Gender | null;
-  id_verified?: boolean | null;
-  police_verified?: boolean | null;
+  id_verification_status?: VerifyStatus | null;
+  police_verification_status?: VerifyStatus | null;
   search_radius_km?: number | string | null;
   default_location_name?: string | null;
   wallet_balance?: number | string | null;
@@ -51,8 +56,8 @@ function mapRow(data: {
     rating: Number(data.rating),
     completed_tasks: Number(data.completed_tasks),
     gender: data.gender ?? 'unspecified',
-    id_verified: data.id_verified ?? false,
-    police_verified: data.police_verified ?? false,
+    id_verification_status: data.id_verification_status ?? 'none',
+    police_verification_status: data.police_verification_status ?? 'none',
     search_radius_km: data.search_radius_km != null ? Number(data.search_radius_km) : 2,
     default_location_name: data.default_location_name ?? null,
     wallet_balance: data.wallet_balance != null ? Number(data.wallet_balance) : 0,
@@ -90,7 +95,7 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
   const { data } = await supabase
     .from('profiles')
     .select(
-      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km, default_location_name, wallet_balance',
+      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verification_status, police_verification_status, search_radius_km, default_location_name, wallet_balance',
     )
     .eq('id', userId)
     .maybeSingle();
@@ -104,7 +109,7 @@ export async function fetchProfilesMap(ids: (string | null)[]): Promise<Record<s
   const { data } = await supabase
     .from('profiles')
     .select(
-      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km, default_location_name, wallet_balance',
+      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verification_status, police_verification_status, search_radius_km, default_location_name, wallet_balance',
     )
     .in('id', uniq);
   const map: Record<string, Profile> = {};
@@ -120,8 +125,8 @@ export async function updateProfile(
       Profile,
       | 'display_name'
       | 'gender'
-      | 'id_verified'
-      | 'police_verified'
+      | 'id_verification_status'
+      | 'police_verification_status'
       | 'search_radius_km'
       | 'default_location_name'
     >
