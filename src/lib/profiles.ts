@@ -17,6 +17,8 @@ export interface Profile {
   search_radius_km: number;
   /** 求救者預存的模糊地址基底（如「夏日公寓」/「安樂區XX街」），發單時當地址底稿。*/
   default_location_name: string | null;
+  /** 虛擬錢包餘額（新台幣）。超收 / 撲空退款會以儲值金存入，可折抵未來訂單。*/
+  wallet_balance: number;
 }
 
 /** 兩種身分的預設名稱（也用來判斷名稱是否「仍是未自訂的預設值」）*/
@@ -38,6 +40,7 @@ function mapRow(data: {
   police_verified?: boolean | null;
   search_radius_km?: number | string | null;
   default_location_name?: string | null;
+  wallet_balance?: number | string | null;
 }): Profile {
   return {
     id: data.id,
@@ -50,6 +53,7 @@ function mapRow(data: {
     police_verified: data.police_verified ?? false,
     search_radius_km: data.search_radius_km != null ? Number(data.search_radius_km) : 2,
     default_location_name: data.default_location_name ?? null,
+    wallet_balance: data.wallet_balance != null ? Number(data.wallet_balance) : 0,
   };
 }
 
@@ -84,7 +88,7 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
   const { data } = await supabase
     .from('profiles')
     .select(
-      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km, default_location_name',
+      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km, default_location_name, wallet_balance',
     )
     .eq('id', userId)
     .maybeSingle();

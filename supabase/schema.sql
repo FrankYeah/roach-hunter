@@ -7,7 +7,7 @@ create table if not exists public.orders (
   hunter_id     uuid references auth.users (id) on delete set null,
   target_size   text not null check (target_size in ('小', '大', '飛')),
   status        text not null default 'searching'
-                  check (status in ('searching', 'matched', 'completed', 'cancelled')),
+                  check (status in ('searching', 'matched', 'completed', 'cancelled', 'escaped')),
   location_lat  double precision,
   location_lng  double precision,
   -- 獵人接單當下的座標（讓求救端能算出 hunter→client 的真實距離 / ETA）
@@ -17,6 +17,8 @@ create table if not exists public.orders (
   -- 求救者的進階篩選：性別偏好 + 最低經驗（completed_tasks）要求
   gender_pref   text not null default 'any' check (gender_pref in ('any', 'male', 'female')),
   min_completed integer not null default 0,
+  -- 第十階段：是否請獵人自備工具（true 時加收工具費）
+  needs_tools   boolean not null default false,
   -- 註：精確地址 / 進入指引「不」放這裡 —— 已於第九階段搬到 order_private（DB 級隱私）
   created_at    timestamptz not null default now()
 );
@@ -80,7 +82,7 @@ end$$;
 alter table public.orders drop constraint if exists orders_status_check;
 alter table public.orders
   add constraint orders_status_check
-  check (status in ('searching', 'matched', 'completed', 'cancelled'));
+  check (status in ('searching', 'matched', 'completed', 'cancelled', 'escaped'));
 
 -- 第六階段：替既有 orders 補上獵人座標欄位（idempotent）
 alter table public.orders add column if not exists hunter_lat double precision;
@@ -102,6 +104,8 @@ create table if not exists public.profiles (
   police_verified boolean not null default false,
   -- 第八階段：獵人自訂接單半徑（公里），高階特權，預設 2
   search_radius_km integer not null default 2,
+  -- 第十階段：虛擬錢包餘額（超收 / 撲空退款的儲值金）
+  wallet_balance  integer not null default 0,
   updated_at      timestamptz not null default now()
 );
 
@@ -232,3 +236,69 @@ end$$;
 -- (4) 移除 orders 上已搬走的敏感欄位，徹底杜絕任務池 / Realtime 的外洩面（無欄位則略過）。
 alter table public.orders drop column if exists exact_address;
 alter table public.orders drop column if exists entry_instructions;
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第十階段：工具費 + 虛擬錢包 + 撲空車馬費結算（idempotent）       ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+-- (1) orders：是否請獵人自備工具
+alter table public.orders add column if not exists needs_tools boolean not null default false;
+
+-- (2) orders.status 允許 'escaped'（撲空）。上方「既有資料表升級」段已重設
+--     orders_status_check 包含 escaped；此處再保險一次（重複執行不報錯）。
+alter table public.orders drop constraint if exists orders_status_check;
+alter table public.orders
+  add constraint orders_status_check
+  check (status in ('searching', 'matched', 'completed', 'cancelled', 'escaped'));
+
+-- (3) profiles：虛擬錢包餘額（儲值金）
+alter table public.profiles add column if not exists wallet_balance integer not null default 0;
+
+-- (4) 撲空結算 RPC：把「改單狀態 + 雙方錢包異動」包成一個原子交易。
+--     用 SECURITY DEFINER 是因為一般 RLS 不允許獵人去改求救者的 profile；
+--     函式內自行驗證呼叫者必須是該訂單『已媒合的獵人』，避免被濫用。
+create or replace function public.settle_escaped(p_order_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client  uuid;
+  v_hunter  uuid;
+  v_price   integer;
+  v_status  text;
+  v_refund  integer;
+  v_fee     constant integer := 150; -- 固定車馬費
+begin
+  select client_id, hunter_id, coalesce(price, 0), status
+    into v_client, v_hunter, v_price, v_status
+  from public.orders
+  where id = p_order_id;
+
+  if not found then
+    raise exception 'order not found';
+  end if;
+  -- 僅允許「已媒合的本獵人」在 matched 狀態下結算撲空
+  if auth.uid() is distinct from v_hunter then
+    raise exception 'only the matched hunter can settle this order';
+  end if;
+  if v_status <> 'matched' then
+    raise exception 'order is not in matched state (current: %)', v_status;
+  end if;
+
+  v_refund := greatest(v_price - v_fee, 0);
+
+  update public.orders set status = 'escaped' where id = p_order_id;
+
+  -- 獵人獲得固定車馬費
+  update public.profiles set wallet_balance = wallet_balance + v_fee where id = v_hunter;
+  -- 發單者預付總額扣除車馬費後的差額，退成儲值金
+  if v_client is not null and v_refund > 0 then
+    update public.profiles set wallet_balance = wallet_balance + v_refund where id = v_client;
+  end if;
+end;
+$$;
+
+grant execute on function public.settle_escaped(uuid) to authenticated;

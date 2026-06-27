@@ -1,16 +1,23 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { TARGET_TIERS } from '@/constants/brand';
+import { ESCAPE_FEE, TARGET_TIERS } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
-import { completeOrderDb, fetchOrderPrivate, tierIdFromSize, type OrderPrivate } from '@/lib/orders';
+import {
+  completeOrderDb,
+  fetchOrderPrivate,
+  settleEscaped,
+  tierIdFromSize,
+  type OrderPrivate,
+} from '@/lib/orders';
 import { bumpCompletedTasks, fetchProfile, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -99,6 +106,40 @@ export default function HunterTaskScreen() {
     }
     finishTask();
     router.replace('/hunter');
+  };
+
+  // 撲空：目標逃逸 → 僅收 $150 車馬費，差額退還發單者儲值金（RPC 原子結算）
+  const [settling, setSettling] = useState(false);
+  const reportEscaped = () => {
+    Alert.alert(
+      '目標已逃逸？',
+      `將以撲空結案：你獲得 $${ESCAPE_FEE} 車馬費，發單者預付的差額會自動退成儲值金。`,
+      [
+        { text: '再找找', style: 'cancel' },
+        {
+          text: '確認逃逸・收車馬費',
+          style: 'destructive',
+          onPress: async () => {
+            if (settling) return;
+            setSettling(true);
+            try {
+              if (acceptedOrder) {
+                const { error } = await settleEscaped(acceptedOrder.id);
+                if (error) {
+                  Alert.alert('結算失敗', error);
+                  return;
+                }
+              }
+              successHaptic();
+              finishTask();
+              router.replace('/hunter');
+            } finally {
+              setSettling(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -207,7 +248,7 @@ export default function HunterTaskScreen() {
         </View>
       </ScrollView>
 
-      {/* 底部：完成任務 */}
+      {/* 底部：完成任務 / 目標逃逸 */}
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
         <Pressable
           onPress={complete}
@@ -218,6 +259,21 @@ export default function HunterTaskScreen() {
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
             <FontAwesome5 name="shoe-prints" size={16} color="#FFFFFF" />
             <Text className="ml-2 text-lg font-black text-white">回報已解決・完成任務</Text>
+          </View>
+        </Pressable>
+        <Pressable
+          onPress={reportEscaped}
+          disabled={settling}
+          accessibilityRole="button"
+          accessibilityLabel={`目標逃逸，收取 ${ESCAPE_FEE} 元車馬費`}
+          className="mt-3"
+          style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }], opacity: settling ? 0.6 : 1 }]}
+        >
+          <View className="flex-row items-center justify-center rounded-[24px] border border-wood-200 bg-white py-3.5">
+            <MaterialCommunityIcons name="run-fast" size={18} color="#9A763C" />
+            <Text className="ml-2 text-sm font-bold text-wood-600">
+              {settling ? '結算中…' : `目標逃逸・收 $${ESCAPE_FEE} 車馬費`}
+            </Text>
           </View>
         </Pressable>
       </View>

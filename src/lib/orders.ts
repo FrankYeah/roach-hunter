@@ -5,7 +5,7 @@ import { isValidLatLng } from '@/lib/geo';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { type LatLng } from '@/store/useAppStore';
 
-export type OrderStatusDb = 'searching' | 'matched' | 'completed' | 'cancelled';
+export type OrderStatusDb = 'searching' | 'matched' | 'completed' | 'cancelled' | 'escaped';
 
 /** DB 的 orders 一列（對應 SQL schema）*/
 export interface OrderRow {
@@ -22,6 +22,8 @@ export interface OrderRow {
   /** 求救者的進階篩選條件 */
   gender_pref: GenderPref;
   min_completed: number;
+  /** 是否請獵人自備工具（true 時加收工具費）*/
+  needs_tools: boolean;
   created_at: string;
 }
 
@@ -45,7 +47,7 @@ export interface OrderPrivate {
  */
 export type OpenOrderRow = OrderRow;
 const OPEN_ORDER_COLS =
-  'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, created_at';
+  'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, needs_tools, created_at';
 
 /** tier id → DB target_size 短碼（對應 SQL 的 CHECK 限制）*/
 const TARGET_SIZE: Record<TargetTier['id'], OrderRow['target_size']> = {
@@ -67,6 +69,7 @@ export interface CreateOrderInput {
   lng: number | null;
   genderPref: GenderPref;
   minCompleted: number;
+  needsTools: boolean;
   exactAddress: string;
   entryInstructions: string | null;
 }
@@ -88,6 +91,7 @@ export async function createOrder(
       price: input.price,
       gender_pref: input.genderPref,
       min_completed: input.minCompleted,
+      needs_tools: input.needsTools,
     })
     .select('id')
     .single();
@@ -180,6 +184,20 @@ export async function cancelOrder(orderId: string): Promise<void> {
 export async function completeOrderDb(orderId: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) return;
   await supabase.from('orders').update({ status: 'completed' }).eq('id', orderId);
+}
+
+/**
+ * 撲空結算（目標逃逸）：呼叫 SECURITY DEFINER RPC `settle_escaped`，原子完成
+ *  - 訂單 status → 'escaped'
+ *  - 獵人錢包 +固定車馬費（$150）
+ *  - 發單者預付總額扣除車馬費後的差額，退成儲值金存入發單者錢包
+ * RPC 內會驗證呼叫者必須是該訂單「已媒合的獵人」，求救者的錢包更新也只能在
+ * definer 權限下完成（一般 RLS 不允許跨人更新 profile）。
+ */
+export async function settleEscaped(orderId: string): Promise<{ error: string | null }> {
+  if (!isSupabaseConfigured || !supabase) return { error: null };
+  const { error } = await supabase.rpc('settle_escaped', { p_order_id: orderId });
+  return { error: error?.message ?? null };
 }
 
 /**

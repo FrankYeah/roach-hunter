@@ -2,16 +2,17 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
 import {
   ADDONS,
   BRAND,
-  CHASE_FEE,
+  ESCAPE_FEE,
   HUNTER_LEVELS,
   TARGET_TIERS,
+  TOOL_PREP_FEE,
   type HunterLevelId,
   type TargetTier,
 } from '@/constants/brand';
@@ -88,14 +89,16 @@ export default function OrderScreen() {
   const [addonIds, setAddonIds] = useState<string[]>([]);
   const [genderPref, setGenderPref] = useState<GenderPref>('any');
   const [levelId, setLevelId] = useState<HunterLevelId>('rookie');
+  const [needsTools, setNeedsTools] = useState(false); // 是否請獵人自備工具（+$35）
   const [exactAddress, setExactAddress] = useState('');
   const [entryInstructions, setEntryInstructions] = useState('');
 
   const tier = TARGET_TIERS.find((t) => t.id === tierId)!;
   const level = HUNTER_LEVELS.find((l) => l.id === levelId)!;
   const addonTotal = ADDONS.filter((a) => addonIds.includes(a.id)).reduce((s, a) => s + a.price, 0);
-  // 動態總價：基礎(大小) + 加購 + 等級加價
-  const total = tier.price + addonTotal + level.surcharge;
+  const toolFee = needsTools ? TOOL_PREP_FEE : 0;
+  // 動態總價：基礎(大小) + 加購 + 等級加價 + 工具費
+  const total = tier.price + addonTotal + level.surcharge + toolFee;
 
   const toggleAddon = (id: string) =>
     setAddonIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -105,6 +108,7 @@ export default function OrderScreen() {
   const userId = useAppStore((s) => s.userId);
   const userLocation = useAppStore((s) => s.userLocation);
   const [submitting, setSubmitting] = useState(false);
+  const [showPayment, setShowPayment] = useState(false); // 模擬付款過場
 
   // 讀取求救者預存的「地址基底」（模糊地址），發單時當底稿降低輸入摩擦
   const [baseLocation, setBaseLocation] = useState<string | null>(null);
@@ -122,36 +126,48 @@ export default function OrderScreen() {
   // 完整地址 = 模糊基底 + 精確門牌；沒設基底時就用使用者輸入的完整地址
   const composedAddress = hasBase ? `${baseLocation} ${exactAddress.trim()}` : exactAddress.trim();
 
-  const confirm = async () => {
-    if (submitting) return;
-    // 強制填寫精確地址，獵人才能順利找到
+  // 按「確認呼救」：先驗證地址，再開啟模擬付款過場（先付款後派單）
+  const onPressSubmit = () => {
     if (!canSubmit) {
       Alert.alert('還差一步', '請先填寫精確門牌地址（媒合成功前不會公開給任何獵人）');
       return;
     }
+    setShowPayment(true);
+  };
+
+  // 確認支付後才真正寫入 Supabase 並進雷達頁。
+  // try/finally 確保任何失敗（含網路丟例外）都會解鎖按鈕，不會卡在「送出中」。
+  const payAndCreate = async () => {
+    if (submitting) return;
     setSubmitting(true);
-    // 定位無效（缺失 / (0,0) 哨兵值）就寫 null，避免污染 DB、讓獵人端算出極端距離
-    const coords = isValidLatLng(userLocation) ? userLocation : null;
-    // 先真實寫入 Supabase（成功才進雷達頁，確保 orderId 已就緒）
-    const { id, error } = await createOrder({
-      clientId: userId,
-      tierId,
-      price: total,
-      lat: coords?.latitude ?? null,
-      lng: coords?.longitude ?? null,
-      genderPref,
-      minCompleted: level.minCompleted,
-      exactAddress: composedAddress,
-      entryInstructions: entryInstructions.trim() || null,
-    });
-    setSubmitting(false);
-    if (error) {
-      Alert.alert('呼救失敗', error);
-      return;
+    try {
+      // 定位無效（缺失 / (0,0) 哨兵值）就寫 null，避免污染 DB、讓獵人端算出極端距離
+      const coords = isValidLatLng(userLocation) ? userLocation : null;
+      const { id, error } = await createOrder({
+        clientId: userId,
+        tierId,
+        price: total,
+        lat: coords?.latitude ?? null,
+        lng: coords?.longitude ?? null,
+        genderPref,
+        minCompleted: level.minCompleted,
+        needsTools,
+        exactAddress: composedAddress,
+        entryInstructions: entryInstructions.trim() || null,
+      });
+      if (error) {
+        Alert.alert('付款或建立訂單失敗', error);
+        return;
+      }
+      setShowPayment(false);
+      startMatching({ tierId, addonIds, total });
+      setOrderId(id);
+      router.push('/matching');
+    } catch (e) {
+      Alert.alert('付款失敗', e instanceof Error ? e.message : '請稍後再試');
+    } finally {
+      setSubmitting(false);
     }
-    startMatching({ tierId, addonIds, total });
-    setOrderId(id);
-    router.push('/matching');
   };
 
   return (
@@ -239,12 +255,13 @@ export default function OrderScreen() {
           <TierCard key={t.id} tier={t} selected={t.id === tierId} onPress={() => setTierId(t.id)} />
         ))}
 
-        {/* 車馬費備註 */}
+        {/* 撲空車馬費備註 */}
         <View className="mt-1 flex-row items-start rounded-2xl border border-wood-200 bg-wood-50 px-4 py-3">
           <MaterialCommunityIcons name="information-outline" size={18} color="#9A763C" />
           <Text className="ml-2 flex-1 text-xs leading-5 text-wood-600">
-            若獵人抵達後<Text className="font-bold">未擊殺或目標跑掉</Text>，將統一收取{' '}
-            <Text className="font-bold">${CHASE_FEE} 元車馬費</Text>，不另收服務費。
+            若獵人抵達後<Text className="font-bold">目標已逃逸</Text>，僅收取{' '}
+            <Text className="font-bold">${ESCAPE_FEE} 元車馬費</Text>，預付金額的差額會
+            <Text className="font-bold">自動退成儲值金</Text>存進你的錢包。
           </Text>
         </View>
 
@@ -279,6 +296,46 @@ export default function OrderScreen() {
                   <Text className="text-xs text-mute">{a.desc}</Text>
                 </View>
                 <Text className="text-sm font-black text-ink">+${a.price}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+
+        {/* 工具準備（單選）*/}
+        <Text className="mb-3 mt-6 text-base font-black text-ink">是否需獵人自備工具？</Text>
+        <Text className="-mt-2 mb-3 text-xs text-mute">拖鞋・殺蟲劑・塑膠袋等</Text>
+        {[
+          { value: false, label: '我會準備好工具', desc: '現場已備妥道具', fee: 0 },
+          { value: true, label: '請獵人自備', desc: '由獵人帶齊裝備上門', fee: TOOL_PREP_FEE },
+        ].map((opt) => {
+          const on = needsTools === opt.value;
+          return (
+            <Pressable
+              key={String(opt.value)}
+              onPress={() => setNeedsTools(opt.value)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`${opt.label}，加價 ${opt.fee} 元`}
+              className="mb-2.5"
+            >
+              <View
+                className={`flex-row items-center rounded-2xl border-2 px-4 py-3 ${
+                  on ? 'border-sos bg-sos/10' : 'border-wood-100 bg-white'
+                }`}
+                style={on ? undefined : shadowSoft}
+              >
+                <View
+                  className={`h-6 w-6 items-center justify-center rounded-full ${on ? 'bg-sos' : 'bg-wood-100'}`}
+                >
+                  {on && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                </View>
+                <View className="ml-3 flex-1">
+                  <Text className="text-sm font-bold text-ink">{opt.label}</Text>
+                  <Text className="text-xs text-mute">{opt.desc}</Text>
+                </View>
+                <Text className={`text-sm font-black ${on ? 'text-sos' : 'text-ink'}`}>
+                  {opt.fee === 0 ? '+$0' : `+$${opt.fee}`}
+                </Text>
               </View>
             </Pressable>
           );
@@ -365,23 +422,91 @@ export default function OrderScreen() {
           </Text>
         </View>
         <Pressable
-          onPress={confirm}
-          disabled={submitting || !canSubmit}
+          onPress={onPressSubmit}
+          disabled={!canSubmit}
           accessibilityRole="button"
-          accessibilityLabel={`確認呼救，指導價 ${total} 元起，開始媒合獵人`}
+          accessibilityLabel={`確認呼救，需先支付 ${total} 元，開始媒合獵人`}
           style={({ pressed }) => [
             shadowSos,
-            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: submitting || !canSubmit ? 0.5 : 1 },
+            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: !canSubmit ? 0.5 : 1 },
           ]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
-            <Ionicons name={canSubmit ? 'flash' : 'create-outline'} size={20} color="#FFFFFF" />
+            <Ionicons name={canSubmit ? 'card' : 'create-outline'} size={20} color="#FFFFFF" />
             <Text className="ml-2 text-lg font-black text-white">
-              {submitting ? '送出中…' : canSubmit ? '確認呼救・開始媒合' : '請先填寫精確地址'}
+              {canSubmit ? '確認呼救・前往付款' : '請先填寫精確地址'}
             </Text>
           </View>
         </Pressable>
       </View>
+
+      {/* 模擬付款過場（先付款後派單）*/}
+      <Modal
+        visible={showPayment}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !submitting && setShowPayment(false)}
+      >
+        <View className="flex-1 justify-end bg-black/40">
+          <Pressable
+            className="flex-1"
+            accessibilityRole="button"
+            accessibilityLabel="關閉付款"
+            onPress={() => !submitting && setShowPayment(false)}
+          />
+          <View className="rounded-t-[28px] bg-paper px-5 pb-8 pt-4" style={shadowSoft}>
+            <View className="mb-4 h-1.5 w-12 self-center rounded-full bg-wood-200" />
+            <Text className="text-xl font-black text-ink">確認支付</Text>
+            <Text className="mt-1 text-xs text-mute">先付款後派單，避免私下交易糾紛</Text>
+
+            {/* 模擬信用卡 */}
+            <View className="mt-4 rounded-3xl bg-ink p-5" style={shadowSoft}>
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs font-semibold tracking-widest text-silver">VISA・模擬卡</Text>
+                <Ionicons name="card" size={20} color="#C3C9D2" />
+              </View>
+              <Text className="mt-4 text-lg font-black tracking-[3px] text-white">
+                •••• •••• •••• 4242
+              </Text>
+              <View className="mt-3 flex-row items-center justify-between">
+                <Text className="text-[11px] text-silver">{BRAND.requesterTitle}</Text>
+                <Text className="text-[11px] text-silver">12 / 28</Text>
+              </View>
+            </View>
+
+            {/* 明細 */}
+            <View className="mt-4 rounded-2xl bg-white p-4" style={shadowSoft}>
+              <View className="flex-row items-center justify-between">
+                <Text className="text-sm text-mute">應付總額</Text>
+                <Text className="text-2xl font-black text-ink">${total}</Text>
+              </View>
+              <Text className="mt-1 text-[11px] text-mute">
+                含現場狀況 ${tier.price}・加購 ${addonTotal}・等級 ${level.surcharge}・工具 ${toolFee}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={payAndCreate}
+              disabled={submitting}
+              accessibilityRole="button"
+              accessibilityLabel={`確認支付 ${total} 元`}
+              className="mt-5"
+              style={({ pressed }) => [
+                shadowSos,
+                { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: submitting ? 0.6 : 1 },
+              ]}
+            >
+              <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
+                <Ionicons name="lock-closed" size={18} color="#FFFFFF" />
+                <Text className="ml-2 text-lg font-black text-white">
+                  {submitting ? '處理付款中…' : `確認支付 $${total} 元`}
+                </Text>
+              </View>
+            </Pressable>
+            <Text className="mt-2 text-center text-[11px] text-mute">模擬金流・不會真實扣款</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

@@ -134,10 +134,7 @@ export default function HomeScreen() {
           <View className="mr-2.5 h-10 w-10 items-center justify-center rounded-2xl bg-cream" style={shadowSoft}>
             <FlipFlopLogo size={24} color="#9A763C" />
           </View>
-          <View>
-            <Text className="text-2xl font-black text-ink">{BRAND.appName}</Text>
-            <Text className="mt-0.5 text-xs text-mute">{BRAND.tagline}</Text>
-          </View>
+          <Text className="text-sm font-bold text-mute">{BRAND.tagline}</Text>
         </View>
         <View className="flex-row items-center">
           {/* 個人設定（名稱 / 地址基底 / 性別）*/}

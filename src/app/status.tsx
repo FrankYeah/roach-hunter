@@ -1,5 +1,6 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
@@ -25,6 +26,7 @@ export default function StatusScreen() {
   const matchedHunterId = useAppStore((s) => s.matchedHunterId);
   const orderId = useAppStore((s) => s.orderId);
   const completeOrder = useAppStore((s) => s.completeOrder);
+  const resetOrder = useAppStore((s) => s.resetOrder);
 
   // mock 後備（未設定 Supabase 時沿用）
   const mockHunter = NEARBY_HUNTERS.find((h) => h.id === matchedHunterId) ?? NEARBY_HUNTERS[0];
@@ -75,6 +77,17 @@ export default function StatusScreen() {
   const avatarUrl = configured ? hunterProfile?.avatar_url ?? null : null;
   const blurb = configured ? '準備好拖鞋，正在趕來' : mockHunter.blurb;
 
+  // 對話框只在「媒合成功（matched）」後出現；searching/escaped 階段不顯示。
+  // mock 模式（未設定 Supabase）沒有真實 status，直接視為已媒合。
+  const orderStatusDb = orderRow?.status ?? null;
+  const showChat = !configured || orderStatusDb === 'matched';
+  const isEscaped = orderStatusDb === 'escaped';
+
+  const goHome = () => {
+    resetOrder();
+    router.replace('/');
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
       {/* 標題列 */}
@@ -94,6 +107,20 @@ export default function StatusScreen() {
       </View>
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
+        {/* 撲空通知（目標逃逸）*/}
+        {isEscaped && (
+          <View className="mt-2 flex-row items-start rounded-3xl bg-wood-50 p-4" style={shadowSoft}>
+            <MaterialCommunityIcons name="run-fast" size={20} color="#9A763C" />
+            <View className="ml-2 flex-1">
+              <Text className="text-sm font-black text-ink">目標已逃逸・任務撲空</Text>
+              <Text className="mt-0.5 text-xs leading-5 text-wood-600">
+                獵人僅收取車馬費，你預付金額的差額已自動退成
+                <Text className="font-bold">儲值金</Text>，存進你的錢包可折抵下次。
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* ETA 大字 */}
         <View className="mt-2 items-center rounded-[28px] bg-sos/10 py-6" style={shadowSoft}>
           <Text className="text-xs font-semibold text-sos">預計抵達時間</Text>
@@ -172,56 +199,74 @@ export default function StatusScreen() {
           </View>
         </View>
 
-        {/* 通訊 UI 框架 */}
-        <Text className="mb-2 mt-6 text-base font-black text-ink">與獵人聯絡</Text>
-        <View className="rounded-3xl bg-cream p-3" style={shadowSoft}>
-          {/* 對方訊息 */}
-          <View className="mb-2 max-w-[80%] self-start rounded-2xl rounded-tl-md bg-white px-3 py-2">
-            <Text className="text-sm text-ink">收到！我帶傢伙馬上到，先別激怒牠 👍</Text>
-          </View>
-          {/* 我方訊息 */}
-          <View className="mb-3 max-w-[80%] self-end rounded-2xl rounded-tr-md bg-sos px-3 py-2">
-            <Text className="text-sm text-white">拜託了，牠超大隻！</Text>
-          </View>
-
-          {/* 快速回覆 */}
-          <View className="mb-3 flex-row flex-wrap">
-            {QUICK_REPLIES.map((q) => (
-              <View key={q} className="mb-2 mr-2 rounded-full border border-wood-200 bg-white px-3 py-1.5">
-                <Text className="text-xs text-ink">{q}</Text>
+        {/* 通訊 UI 框架：只有媒合成功（matched）後才出現 */}
+        {showChat && (
+          <>
+            <Text className="mb-2 mt-6 text-base font-black text-ink">與獵人聯絡</Text>
+            <View className="rounded-3xl bg-cream p-3" style={shadowSoft}>
+              {/* 對方訊息 */}
+              <View className="mb-2 max-w-[80%] self-start rounded-2xl rounded-tl-md bg-white px-3 py-2">
+                <Text className="text-sm text-ink">收到！我帶傢伙馬上到，先別激怒牠 👍</Text>
               </View>
-            ))}
-          </View>
+              {/* 我方訊息 */}
+              <View className="mb-3 max-w-[80%] self-end rounded-2xl rounded-tr-md bg-sos px-3 py-2">
+                <Text className="text-sm text-white">拜託了，牠超大隻！</Text>
+              </View>
 
-          {/* 輸入列（框架） */}
-          <View className="flex-row items-center rounded-full bg-white px-3 py-2">
-            <Text className="flex-1 text-sm text-mute">傳訊息給 {name}…</Text>
-            <View className="h-9 w-9 items-center justify-center rounded-full bg-wood-100">
-              <Ionicons name="call" size={16} color="#9A763C" />
+              {/* 快速回覆 */}
+              <View className="mb-3 flex-row flex-wrap">
+                {QUICK_REPLIES.map((q) => (
+                  <View key={q} className="mb-2 mr-2 rounded-full border border-wood-200 bg-white px-3 py-1.5">
+                    <Text className="text-xs text-ink">{q}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* 輸入列（框架） */}
+              <View className="flex-row items-center rounded-full bg-white px-3 py-2">
+                <Text className="flex-1 text-sm text-mute">傳訊息給 {name}…</Text>
+                <View className="h-9 w-9 items-center justify-center rounded-full bg-wood-100">
+                  <Ionicons name="call" size={16} color="#9A763C" />
+                </View>
+                <View className="ml-2 h-9 w-9 items-center justify-center rounded-full bg-sos">
+                  <Ionicons name="send" size={15} color="#FFFFFF" />
+                </View>
+              </View>
             </View>
-            <View className="ml-2 h-9 w-9 items-center justify-center rounded-full bg-sos">
-              <Ionicons name="send" size={15} color="#FFFFFF" />
-            </View>
-          </View>
-        </View>
+          </>
+        )}
       </ScrollView>
 
-      {/* 底部：完成任務（demo 用，前往評價）*/}
+      {/* 底部：撲空時回首頁；否則完成任務（demo 用，前往評價）*/}
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
-        <Pressable
-          onPress={() => {
-            completeOrder();
-            router.push('/review');
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="獵人已解決，前往評價"
-          style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
-        >
-          <View className="flex-row items-center justify-center rounded-[24px] bg-ink py-4">
-            <Ionicons name="shield-checkmark" size={20} color="#FFFFFF" />
-            <Text className="ml-2 text-lg font-black text-white">獵人已解決・前往評價</Text>
-          </View>
-        </Pressable>
+        {isEscaped ? (
+          <Pressable
+            onPress={goHome}
+            accessibilityRole="button"
+            accessibilityLabel="任務撲空，返回首頁"
+            style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+          >
+            <View className="flex-row items-center justify-center rounded-[24px] bg-wood-300 py-4">
+              <Ionicons name="home" size={20} color="#FFFFFF" />
+              <Text className="ml-2 text-lg font-black text-white">目標逃逸・返回首頁</Text>
+            </View>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={() => {
+              completeOrder();
+              router.push('/review');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="獵人已解決，前往評價"
+            style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+          >
+            <View className="flex-row items-center justify-center rounded-[24px] bg-ink py-4">
+              <Ionicons name="shield-checkmark" size={20} color="#FFFFFF" />
+              <Text className="ml-2 text-lg font-black text-white">獵人已解決・前往評價</Text>
+            </View>
+          </Pressable>
+        )}
       </View>
     </SafeAreaView>
   );

@@ -189,6 +189,18 @@ export default function HunterProfileScreen() {
           </View>
         </View>
 
+        {/* 虛擬錢包 / 收入 */}
+        <View className="mt-4 flex-row items-center rounded-3xl bg-ink p-4" style={shadowSoft}>
+          <View className="h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
+            <MaterialCommunityIcons name="wallet-outline" size={24} color="#FFFFFF" />
+          </View>
+          <View className="ml-3 flex-1">
+            <Text className="text-xs text-silver">錢包餘額</Text>
+            <Text className="text-2xl font-black text-white">${profile?.wallet_balance ?? 0}</Text>
+          </View>
+          <Text className="text-[11px] text-silver">含撲空車馬費</Text>
+        </View>
+
         {/* 性別 */}
         <View className="mb-2 mt-6 flex-row items-center">
           <MaterialCommunityIcons name="account-outline" size={18} color="#2A2521" />

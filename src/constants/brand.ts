@@ -74,8 +74,11 @@ export const TARGET_TIERS: TargetTier[] = [
   { id: 'flying', label: '會飛的', hint: '在空中亂竄的惡夢', price: 210, mosaic: 4 },
 ];
 
-/** 若未擊殺 / 目標跑掉，統一收取的車馬費 */
-export const CHASE_FEE = 100;
+/** 撲空（目標逃逸）時獵人可獲得的固定車馬費；發單者預付的差額退成儲值金 */
+export const ESCAPE_FEE = 150;
+
+/** 工具準備：選「請獵人自備（拖鞋 / 殺蟲劑 / 塑膠袋）」時的加價 */
+export const TOOL_PREP_FEE = 35;
 
 /** 加購服務（MVP 假資料） */
 export const ADDONS = [
