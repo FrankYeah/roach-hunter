@@ -2,8 +2,8 @@ import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Location from 'expo-location';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,8 +12,9 @@ import { FlipFlopLogo } from '@/components/flip-flop-logo';
 import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
-import { CURRENT_USER, NEARBY_HUNTERS, type Hunter } from '@/data/hunters';
+import { NEARBY_HUNTERS, type Hunter } from '@/data/hunters';
 import { selectHaptic, tapHaptic } from '@/lib/haptics';
+import { fetchProfile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
 /** 預設座標（定位失敗/未授權時退回台北市中心） */
@@ -73,6 +74,23 @@ export default function HomeScreen() {
   const toggleRole = useAppStore((s) => s.toggleRole);
   const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   const setUserLocation = useAppStore((s) => s.setUserLocation);
+  const userId = useAppStore((s) => s.userId);
+  const displayName = useAppStore((s) => s.displayName);
+  const setDisplayName = useAppStore((s) => s.setDisplayName);
+
+  // 每次回到首頁都同步一次顯示名稱 → 個人設定改完返回立即反映（搭配 store 即時更新）
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      let active = true;
+      fetchProfile(userId).then((p) => {
+        if (active && p) setDisplayName(p.display_name);
+      });
+      return () => {
+        active = false;
+      };
+    }, [userId, setDisplayName]),
+  );
 
   const [center, setCenter] = useState<LatLng | null>(null);
   const [markers, setMarkers] = useState<PlacedHunter[]>([]);
@@ -158,7 +176,7 @@ export default function HomeScreen() {
             <View className="h-7 w-7 items-center justify-center rounded-full bg-wood-300">
               <Ionicons name="home" size={14} color="#FFFFFF" />
             </View>
-            <Text className="ml-2 text-xs font-bold text-ink">{CURRENT_USER.title}</Text>
+            <Text className="ml-2 text-xs font-bold text-ink">{displayName ?? '求救者'}</Text>
             <MaterialCommunityIcons name="swap-horizontal" size={14} color="#9A8F80" style={{ marginLeft: 6 }} />
           </Pressable>
         </View>

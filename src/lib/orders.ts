@@ -24,6 +24,8 @@ export interface OrderRow {
   min_completed: number;
   /** 是否請獵人自備工具（true 時加收工具費）*/
   needs_tools: boolean;
+  /** 是否為 VVIP 急件（由 DB trigger 依發單者實際完成數判定，前端無法偽造）*/
+  is_vip: boolean;
   created_at: string;
 }
 
@@ -47,7 +49,7 @@ export interface OrderPrivate {
  */
 export type OpenOrderRow = OrderRow;
 const OPEN_ORDER_COLS =
-  'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, needs_tools, created_at';
+  'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, needs_tools, is_vip, created_at';
 
 /** tier id → DB target_size 短碼（對應 SQL 的 CHECK 限制）*/
 const TARGET_SIZE: Record<TargetTier['id'], OrderRow['target_size']> = {
@@ -105,6 +107,21 @@ export async function createOrder(
   });
   if (privErr) return { id: orderId, error: privErr.message };
   return { id: orderId, error: null };
+}
+
+/**
+ * 求救者的「累積已完成呼救數」 —— 用來推導求救者稱號 / VVIP 身分。
+ * 直接 count 自己（client_id = 自己）且 status = completed 的訂單；orders 的 RLS
+ * 已允許 client 讀自己的單，故無需新增計數欄位，永遠精準、不會與真實狀態漂移。
+ */
+export async function fetchClientCompletedCount(userId: string | null): Promise<number> {
+  if (!isSupabaseConfigured || !supabase || !userId) return 0;
+  const { count } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', userId)
+    .eq('status', 'completed');
+  return count ?? 0;
 }
 
 /** 讀取單一訂單（已不含敏感欄位；精確地址請改用 fetchOrderPrivate）*/

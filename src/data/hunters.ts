@@ -95,10 +95,10 @@ export const NEARBY_HUNTERS: Hunter[] = [
 
 export const RANK_ORDER = HUNTER_RANKS;
 
-/** 目前登入的呼救者（鎮宅金主）— mock */
+/** 目前登入的呼救者 — mock（rescued=8 → 動態稱號「冷靜的課金大佬」）*/
 export const CURRENT_USER = {
   name: '你',
-  title: '鎮宅金主',
+  title: '冷靜的課金大佬',
   address: '夏日公寓 4 樓・客廳',
   rescued: 8,
 } as const;

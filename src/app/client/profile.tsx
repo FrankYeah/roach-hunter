@@ -6,9 +6,11 @@ import { useEffect, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { clientLevelFromRequested, isVvip } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { signOut } from '@/lib/auth';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
+import { fetchClientCompletedCount } from '@/lib/orders';
 import { fetchProfile, updateProfile, type Gender, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -20,13 +22,15 @@ const GENDERS: { id: Gender; label: string; icon: keyof typeof Ionicons.glyphMap
 
 export default function ClientProfileScreen() {
   const userId = useAppStore((s) => s.userId);
+  const setDisplayName = useAppStore((s) => s.setDisplayName);
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [gender, setGender] = useState<Gender>('unspecified');
+  const [requestedCount, setRequestedCount] = useState(0);
 
-  // 回填現有的個人資料（名稱 / 地址基底 / 性別）
+  // 回填現有的個人資料（名稱 / 地址基底 / 性別）+ 累積完成數（推導稱號）
   useEffect(() => {
     if (!userId) return;
     let active = true;
@@ -37,10 +41,15 @@ export default function ClientProfileScreen() {
       setLocation(p.default_location_name ?? '');
       setGender(p.gender);
     });
+    fetchClientCompletedCount(userId).then((n) => active && setRequestedCount(n));
     return () => {
       active = false;
     };
   }, [userId]);
+
+  // 動態稱號：依累積完成的呼救次數（0→初階驚嚇者 / 3→課金大佬 / 10→VVIP）
+  const clientLevel = clientLevelFromRequested(requestedCount);
+  const vvip = isVvip(requestedCount);
 
   const chooseGender = (g: Gender) => {
     selectHaptic();
@@ -50,8 +59,11 @@ export default function ClientProfileScreen() {
 
   const save = () => {
     successHaptic();
-    const display_name = name.trim() || '鎮宅金主';
+    const display_name = name.trim() || '求救者';
     setName(display_name);
+    // 同步更新：本頁卡片 + 全域 store（首頁／上一頁立即反映，名稱可隨時再改）
+    setProfile((prev) => (prev ? { ...prev, display_name } : prev));
+    setDisplayName(display_name);
     updateProfile(userId, {
       display_name,
       default_location_name: location.trim() || null,
@@ -85,14 +97,30 @@ export default function ClientProfileScreen() {
             )}
           </View>
           <View className="ml-4 flex-1">
-            <Text className="text-lg font-black text-ink">{profile?.display_name ?? '鎮宅金主'}</Text>
+            <Text className="text-lg font-black text-ink">{profile?.display_name ?? '求救者'}</Text>
             <View className="mt-1 flex-row items-center">
               <Ionicons name="star" size={13} color="#F5A623" />
               <Text className="ml-1 text-xs font-bold text-ink">{(profile?.rating ?? 5).toFixed(1)}</Text>
-              <Text className="ml-2 text-xs text-mute">求救者・鎮宅金主</Text>
+              <Text className="ml-2 text-xs text-mute">求救者・累積 {requestedCount} 次</Text>
             </View>
           </View>
+          {/* 動態稱號徽章 */}
+          <View className={`flex-row items-center rounded-full px-2.5 py-1 ${clientLevel.badge}`}>
+            <MaterialCommunityIcons name={clientLevel.icon as never} size={13} color={vvip ? '#FFFFFF' : '#9A763C'} />
+            <Text className={`ml-1 text-[11px] font-bold ${clientLevel.text}`}>{clientLevel.name}</Text>
+          </View>
         </View>
+
+        {/* VVIP 特權說明 */}
+        {vvip && (
+          <View className="mt-3 flex-row items-start rounded-2xl bg-ink px-4 py-3" style={shadowSoft}>
+            <MaterialCommunityIcons name="crown" size={18} color="#E6B422" />
+            <Text className="ml-2 flex-1 text-xs leading-5 text-silver">
+              <Text className="font-black text-white">VVIP 領域展開・</Text>
+              你發出的呼救會標記為 <Text className="font-bold text-white">金色急件</Text>，在獵人任務池無視新手延遲、優先置頂，秒被搶接。
+            </Text>
+          </View>
+        )}
 
         {/* 虛擬錢包 / 儲值金 */}
         <View className="mt-4 flex-row items-center rounded-3xl bg-ink p-4" style={shadowSoft}>
@@ -115,7 +143,7 @@ export default function ClientProfileScreen() {
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="鎮宅金主"
+            placeholder="求救者"
             placeholderTextColor="#C4BCB0"
             accessibilityLabel="顯示名稱"
             maxLength={20}

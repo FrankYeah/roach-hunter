@@ -8,9 +8,50 @@ export const BRAND = {
   tagline: '穿著夾腳拖，馬上到你家救援',
   /** 首頁巨大呼救按鈕文案（不可更動） */
   sosLabel: '乾，出現了！',
-  /** 呼救者稱號 */
-  requesterTitle: '鎮宅金主',
 } as const;
+
+/**
+ * 求救者專屬等級稱號（依「累積完成的呼救次數」動態變化）。
+ *  0 趟：初階驚嚇者 ／ 3 趟以上：冷靜的課金大佬 ／ 10 趟以上：VVIP 領域展開。
+ * VVIP（達 VVIP_MIN_REQUESTED 趟）發單時，訂單會被標記為 VIP，
+ * 在獵人任務池有金色徽章、無視新手延遲、優先置頂。
+ */
+export type ClientLevelId = 'novice' | 'whale' | 'vvip';
+
+export interface ClientLevel {
+  id: ClientLevelId;
+  name: string;
+  /** 達到此稱號所需的最少「已完成呼救」次數 */
+  minRequested: number;
+  /** 徽章 icon（MaterialCommunityIcons）+ 底色 / 文字色（Tailwind class） */
+  icon: string;
+  badge: string;
+  text: string;
+}
+
+/** VVIP 門檻：累積完成呼救達此次數即為 VVIP，享優先派單特權 */
+export const VVIP_MIN_REQUESTED = 10;
+
+export const CLIENT_LEVELS: ClientLevel[] = [
+  { id: 'novice', name: '初階驚嚇者', minRequested: 0, icon: 'ghost-outline', badge: 'bg-wood-100', text: 'text-wood-600' },
+  { id: 'whale', name: '冷靜的課金大佬', minRequested: 3, icon: 'cash-multiple', badge: 'bg-wood-300', text: 'text-ink' },
+  { id: 'vvip', name: 'VVIP 領域展開', minRequested: VVIP_MIN_REQUESTED, icon: 'crown', badge: 'bg-ink', text: 'text-white' },
+];
+
+/** 由「已完成呼救數」推導目前的求救者稱號（取符合的最高門檻）*/
+export function clientLevelFromRequested(requested: number): ClientLevel {
+  let lvl = CLIENT_LEVELS[0];
+  for (const l of CLIENT_LEVELS) if (requested >= l.minRequested) lvl = l;
+  return lvl;
+}
+
+/** 是否為 VVIP（達門檻）*/
+export function isVvip(requested: number): boolean {
+  return requested >= VVIP_MIN_REQUESTED;
+}
+
+/** VIP 訂單在任務池的金色強調色 */
+export const VIP_GOLD = '#E6B422';
 
 /** 獵人等級稱號（由低到高，沿用作 mock 資料的稱號型別） */
 export const HUNTER_RANKS = ['拖鞋見習生', '捲報紙達人', '白金殺手'] as const;

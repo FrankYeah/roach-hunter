@@ -67,7 +67,7 @@ export default function HunterTaskScreen() {
   const address = acceptedOrder ? priv?.exact_address ?? '解鎖地址中…' : mockTask.address;
   const entryInstructions = priv?.entry_instructions ?? null;
 
-  // 讀取對方（鎮宅金主）的真實 profile
+  // 讀取對方（求救者）的真實 profile
   const [client, setClient] = useState<Profile | null>(null);
   useEffect(() => {
     if (!acceptedOrder?.client_id) return;
@@ -77,7 +77,7 @@ export default function HunterTaskScreen() {
       active = false;
     };
   }, [acceptedOrder?.client_id]);
-  const clientName = client?.display_name ?? '鎮宅金主';
+  const clientName = client?.display_name ?? '求救者';
 
   // 倒數秒數再夾一層：不合理（NaN / 負 / 超過 2 小時）一律退回 10:00
   const initialSecs = Number.isFinite(etaMin) && etaMin > 0 && etaMin <= 120 ? etaMin * 60 : 600;

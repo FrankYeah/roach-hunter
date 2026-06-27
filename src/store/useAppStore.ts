@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import type { TargetTier } from '@/constants/brand';
 import type { OrderRow } from '@/lib/orders';
 
-/** 使用者身分：求救者（鎮宅金主）/ 獵人 */
+/** 使用者身分：求救者 / 獵人 */
 export type Role = 'requester' | 'hunter';
 
 /** 訂單狀態：閒置 → 媒合中 → 已接單 → 任務完成 */
@@ -52,6 +52,9 @@ interface AppState {
   authReady: boolean;
   phone: string | null;
   userId: string | null;
+  /** 目前使用者顯示名稱（跨頁即時同步：個人設定儲存後，首頁／上一頁立即反映）*/
+  displayName: string | null;
+  setDisplayName: (name: string | null) => void;
   /** 使用者目前定位（建立訂單寫入 lat/lng 用）*/
   userLocation: LatLng | null;
   login: (phone: string) => void;
@@ -89,9 +92,11 @@ export const useAppStore = create<AppState>((set) => ({
   authReady: false,
   phone: null,
   userId: null,
+  displayName: null,
+  setDisplayName: (name) => set({ displayName: name }),
   userLocation: null,
   login: (phone) => set({ isAuthenticated: true, phone }),
-  logout: () => set({ isAuthenticated: false, phone: null, userId: null }),
+  logout: () => set({ isAuthenticated: false, phone: null, userId: null, displayName: null }),
   setAuthReady: (v) => set({ authReady: v }),
   applySession: (session) =>
     set({

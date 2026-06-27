@@ -26,7 +26,7 @@ export interface SosTask {
 export const SOS_TASKS: SosTask[] = [
   {
     id: 't1',
-    requesterTitle: '鎮宅金主',
+    requesterTitle: '冷靜的課金大佬',
     address: '夏日公寓 4 樓・客廳',
     distanceM: 220,
     tierId: 'flying',
@@ -36,7 +36,7 @@ export const SOS_TASKS: SosTask[] = [
   },
   {
     id: 't2',
-    requesterTitle: '鎮宅金主',
+    requesterTitle: '冷靜的課金大佬',
     address: '海風華廈 2 樓・廚房',
     distanceM: 380,
     tierId: 'big',
@@ -46,7 +46,7 @@ export const SOS_TASKS: SosTask[] = [
   },
   {
     id: 't3',
-    requesterTitle: '鎮宅金主',
+    requesterTitle: '冷靜的課金大佬',
     address: '巷口套房・浴室',
     distanceM: 540,
     tierId: 'small',
@@ -56,7 +56,7 @@ export const SOS_TASKS: SosTask[] = [
   },
   {
     id: 't4',
-    requesterTitle: '鎮宅金主',
+    requesterTitle: '冷靜的課金大佬',
     address: '綠丘社區 7 樓・陽台',
     distanceM: 760,
     tierId: 'big',

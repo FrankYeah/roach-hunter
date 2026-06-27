@@ -23,10 +23,12 @@ export interface Profile {
 
 /** 兩種身分的預設名稱（也用來判斷名稱是否「仍是未自訂的預設值」）*/
 export const DEFAULT_NAMES: Record<Role, string> = {
-  requester: '鎮宅金主',
+  requester: '求救者',
   hunter: '見習獵人',
 };
-const ALL_DEFAULTS = Object.values(DEFAULT_NAMES);
+/** 舊版預設名（如「鎮宅金主」）也視為「未自訂」，下次進入時一併同步成新預設 → 徹底淘汰舊詞 */
+const LEGACY_DEFAULT_NAMES = ['鎮宅金主'];
+const ALL_DEFAULTS = [...Object.values(DEFAULT_NAMES), ...LEGACY_DEFAULT_NAMES];
 
 /** numeric 欄位可能以字串回傳，統一轉成 number；新欄位給安全預設 */
 function mapRow(data: {

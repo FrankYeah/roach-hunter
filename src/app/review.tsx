@@ -6,9 +6,10 @@ import { Animated, Easing, Image, Pressable, ScrollView, Text, View } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
-import { BRAND } from '@/constants/brand';
+import { BRAND, clientLevelFromRequested } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { CURRENT_USER, NEARBY_HUNTERS } from '@/data/hunters';
+import { fetchClientCompletedCount } from '@/lib/orders';
 import { fetchProfile, type Profile } from '@/lib/profiles';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
@@ -25,14 +26,18 @@ export default function ReviewScreen() {
   const userId = useAppStore((s) => s.userId);
   const resetOrder = useAppStore((s) => s.resetOrder);
 
-  // 真實模式：讀取獵人 + 自己的 profile（顯示名稱 / 評分 / 大頭貼）
+  // 真實模式：讀取獵人 + 自己的 profile（顯示名稱 / 評分 / 大頭貼）+ 累積完成數
   const [hunterProfile, setHunterProfile] = useState<Profile | null>(null);
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
+  const [clientCount, setClientCount] = useState<number | null>(null);
   useEffect(() => {
     if (!configured) return;
     let active = true;
     if (matchedHunterId) fetchProfile(matchedHunterId).then((p) => active && setHunterProfile(p));
-    if (userId) fetchProfile(userId).then((p) => active && setMyProfile(p));
+    if (userId) {
+      fetchProfile(userId).then((p) => active && setMyProfile(p));
+      fetchClientCompletedCount(userId).then((n) => active && setClientCount(n));
+    }
     return () => {
       active = false;
     };
@@ -41,7 +46,9 @@ export default function ReviewScreen() {
   const hunterName = configured ? hunterProfile?.display_name ?? '你的獵人' : mockHunter.name;
   const hunterAvatarUrl = configured ? hunterProfile?.avatar_url ?? null : null;
   const hunterAvatarColor = configured ? '#C9A66B' : mockHunter.avatarColor;
-  const myTitle = configured ? myProfile?.display_name ?? '鎮宅金主' : CURRENT_USER.title;
+  // 求救者動態稱號：依累積完成的呼救次數（剛結束這趟也算進來）
+  const rescuedCount = configured ? clientCount ?? 0 : CURRENT_USER.rescued + 1;
+  const clientTitle = clientLevelFromRequested(rescuedCount).name;
   // 獵人「回評」給你的星數 = 你自己 profile 上的即時評分
   const myRating = configured ? myProfile?.rating ?? 5 : 5;
   // 結案：清空訂單狀態並回到首頁根畫面
@@ -127,9 +134,9 @@ export default function ReviewScreen() {
               />
             </View>
             <View className="ml-4 flex-1">
-              <Text className="text-2xl font-black text-white">{myTitle}</Text>
+              <Text className="text-2xl font-black text-white">{clientTitle}</Text>
               <Text className="mt-0.5 text-xs text-silver">
-                累積救援 {CURRENT_USER.rescued + 1} 次・解鎖鎮宅金主特權
+                累積救援 {rescuedCount} 次・解鎖「{clientTitle}」特權
               </Text>
             </View>
           </View>

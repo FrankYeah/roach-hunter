@@ -7,7 +7,7 @@ import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/level-badge';
-import { levelFromCompleted } from '@/constants/brand';
+import { ESCAPE_FEE, levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
@@ -83,6 +83,10 @@ export default function StatusScreen() {
   const showChat = !configured || orderStatusDb === 'matched';
   const isEscaped = orderStatusDb === 'escaped';
 
+  // 撲空金流透明化：預付總額 − 固定車馬費 = 退回儲值金的差額（讓金流流向一目了然）
+  const escapePrice = orderRow?.price ?? null;
+  const escapeRefund = escapePrice != null ? Math.max(escapePrice - ESCAPE_FEE, 0) : null;
+
   const goHome = () => {
     resetOrder();
     router.replace('/');
@@ -109,15 +113,35 @@ export default function StatusScreen() {
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
         {/* 撲空通知（目標逃逸）*/}
         {isEscaped && (
-          <View className="mt-2 flex-row items-start rounded-3xl bg-wood-50 p-4" style={shadowSoft}>
-            <MaterialCommunityIcons name="run-fast" size={20} color="#9A763C" />
-            <View className="ml-2 flex-1">
-              <Text className="text-sm font-black text-ink">目標已逃逸・任務撲空</Text>
-              <Text className="mt-0.5 text-xs leading-5 text-wood-600">
-                獵人僅收取車馬費，你預付金額的差額已自動退成
-                <Text className="font-bold">儲值金</Text>，存進你的錢包可折抵下次。
-              </Text>
+          <View className="mt-2 rounded-3xl bg-wood-50 p-4" style={shadowSoft}>
+            <View className="flex-row items-center">
+              <MaterialCommunityIcons name="run-fast" size={20} color="#9A763C" />
+              <Text className="ml-2 text-sm font-black text-ink">目標已逃逸・任務撲空</Text>
             </View>
+            <Text className="mt-2 text-xs leading-5 text-wood-600">
+              獵人趕到時目標已不見，僅收取車馬費。金流明細如下：
+            </Text>
+            {/* 數學透明化：預付總額 − 車馬費 = 退回儲值金 */}
+            <View className="mt-2 rounded-2xl bg-white p-3">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs text-mute">你預付總額</Text>
+                <Text className="text-sm font-bold text-ink">
+                  {escapePrice != null ? `$${escapePrice}` : '—'}
+                </Text>
+              </View>
+              <View className="mt-1 flex-row items-center justify-between">
+                <Text className="text-xs text-mute">扣除車馬費</Text>
+                <Text className="text-sm font-bold text-sos">- ${ESCAPE_FEE}</Text>
+              </View>
+              <View className="my-2 h-px bg-wood-100" />
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs font-bold text-ink">退回儲值金錢包</Text>
+                <Text className="text-base font-black text-leaf">
+                  {escapeRefund != null ? `+ $${escapeRefund}` : '已退回差額'}
+                </Text>
+              </View>
+            </View>
+            <Text className="mt-2 text-[11px] text-mute">儲值金可於下次呼救時折抵。</Text>
           </View>
         )}
 

@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/level-badge';
 import { MosaicTarget } from '@/components/mosaic-target';
-import { TARGET_TIERS, levelFromCompleted, nextLevel } from '@/constants/brand';
+import { TARGET_TIERS, VIP_GOLD, levelFromCompleted, nextLevel } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { PLATFORM_FEE_RATE, SOS_TASKS, netEarning, tierOf, type SosTask } from '@/data/tasks';
 import { safeDistanceMeters } from '@/lib/geo';
@@ -36,6 +36,8 @@ interface PoolItem {
   price: number;
   net: number;
   agoMin: number;
+  /** VVIP 急件：金色徽章、優先置頂、無視新手延遲 */
+  isVip: boolean;
 }
 
 function minutesSince(iso: string): number {
@@ -59,6 +61,7 @@ function itemFromOrder(o: OpenOrderRow, loc: LatLng | null): PoolItem {
     price,
     net: netEarning(price),
     agoMin: minutesSince(o.created_at),
+    isVip: o.is_vip ?? false,
   };
 }
 
@@ -73,12 +76,23 @@ function itemFromTask(t: SosTask): PoolItem {
     price: tier.price,
     net: netEarning(tier.price),
     agoMin: t.postedAgoMin,
+    isVip: false,
   };
 }
 
 function PoolCard({ item, busy, onAccept }: { item: PoolItem; busy: boolean; onAccept: () => void }) {
   return (
-    <View className="mb-3 rounded-3xl bg-white p-4" style={shadowSoft}>
+    <View
+      className="mb-3 rounded-3xl bg-white p-4"
+      style={[shadowSoft, item.isVip ? { borderWidth: 2, borderColor: VIP_GOLD } : null]}
+    >
+      {/* VVIP 急件徽章（金色）*/}
+      {item.isVip && (
+        <View className="mb-3 flex-row items-center self-start rounded-full px-3 py-1" style={{ backgroundColor: VIP_GOLD }}>
+          <MaterialCommunityIcons name="crown" size={13} color="#FFFFFF" />
+          <Text className="ml-1 text-[11px] font-black text-white">VVIP 急件・優先派單</Text>
+        </View>
+      )}
       <View className="flex-row items-center">
         <View className="h-14 w-14 items-center justify-center rounded-2xl bg-cream">
           <MosaicTarget size={28 + item.mosaic * 7} />
@@ -209,10 +223,11 @@ export default function HunterPoolScreen() {
   );
 
   // ── 優先派單：未完整認證者，未指定等級的單延遲 3 秒才顯示 ──
+  //    例外：VVIP 急件（is_vip）無視此延遲，對所有獵人立即現身、秒搶。
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     eligible.forEach((o) => {
-      const delayed = !fullyVerified && (o.min_completed ?? 0) === 0;
+      const delayed = !fullyVerified && (o.min_completed ?? 0) === 0 && !o.is_vip;
       if (delayed) {
         timers.push(
           setTimeout(
@@ -262,9 +277,9 @@ export default function HunterPoolScreen() {
     router.push('/hunter/task');
   };
 
-  const items: PoolItem[] = configured
-    ? visibleOrders.map((o) => itemFromOrder(o, userLocation))
-    : SOS_TASKS.map(itemFromTask);
+  const items: PoolItem[] = (
+    configured ? visibleOrders.map((o) => itemFromOrder(o, userLocation)) : SOS_TASKS.map(itemFromTask)
+  ).sort((a, b) => Number(b.isVip) - Number(a.isVip)); // VVIP 急件優先置頂（穩定排序保留時間序）
 
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>

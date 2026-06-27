@@ -2,7 +2,18 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
@@ -106,6 +117,7 @@ export default function OrderScreen() {
   const startMatching = useAppStore((s) => s.startMatching);
   const setOrderId = useAppStore((s) => s.setOrderId);
   const userId = useAppStore((s) => s.userId);
+  const displayName = useAppStore((s) => s.displayName);
   const userLocation = useAppStore((s) => s.userLocation);
   const [submitting, setSubmitting] = useState(false);
   const [showPayment, setShowPayment] = useState(false); // 模擬付款過場
@@ -126,8 +138,11 @@ export default function OrderScreen() {
   // 完整地址 = 模糊基底 + 精確門牌；沒設基底時就用使用者輸入的完整地址
   const composedAddress = hasBase ? `${baseLocation} ${exactAddress.trim()}` : exactAddress.trim();
 
-  // 按「確認呼救」：先驗證地址，再開啟模擬付款過場（先付款後派單）
+  // 按「確認呼救」：先收鍵盤，驗證地址，再開啟模擬付款過場（先付款後派單）。
+  // 按鈕本身永遠可按（不再被 disabled / 非同步狀態鎖死）→ 沒填地址就跳提示，
+  // 填了（長度 > 0）就直接進付款，徹底排除「填了還是灰色送不出」。
   const onPressSubmit = () => {
+    Keyboard.dismiss();
     if (!canSubmit) {
       Alert.alert('還差一步', '請先填寫精確門牌地址（媒合成功前不會公開給任何獵人）');
       return;
@@ -188,7 +203,17 @@ export default function OrderScreen() {
         </View>
       </View>
 
-      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        className="flex-1"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={8}
+      >
+      <ScrollView
+        className="flex-1 px-5"
+        contentContainerStyle={{ paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* 地址基底（讀自個人設定的模糊地址）*/}
         <Pressable
           onPress={() => router.push('/client/profile')}
@@ -421,17 +446,18 @@ export default function OrderScreen() {
             <Text className="text-sm font-semibold text-mute"> 起</Text>
           </Text>
         </View>
+        {/* 永遠可按：沒填地址 → 跳提示；填了 → 進付款。不再用 disabled 鎖死按鈕 */}
         <Pressable
           onPress={onPressSubmit}
-          disabled={!canSubmit}
           accessibilityRole="button"
           accessibilityLabel={`確認呼救，需先支付 ${total} 元，開始媒合獵人`}
-          style={({ pressed }) => [
-            shadowSos,
-            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: !canSubmit ? 0.5 : 1 },
-          ]}
+          style={({ pressed }) => [shadowSos, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
         >
-          <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
+          <View
+            className={`flex-row items-center justify-center rounded-[24px] py-4 ${
+              canSubmit ? 'bg-sos' : 'bg-wood-300'
+            }`}
+          >
             <Ionicons name={canSubmit ? 'card' : 'create-outline'} size={20} color="#FFFFFF" />
             <Text className="ml-2 text-lg font-black text-white">
               {canSubmit ? '確認呼救・前往付款' : '請先填寫精確地址'}
@@ -439,6 +465,7 @@ export default function OrderScreen() {
           </View>
         </Pressable>
       </View>
+      </KeyboardAvoidingView>
 
       {/* 模擬付款過場（先付款後派單）*/}
       <Modal
@@ -469,7 +496,7 @@ export default function OrderScreen() {
                 •••• •••• •••• 4242
               </Text>
               <View className="mt-3 flex-row items-center justify-between">
-                <Text className="text-[11px] text-silver">{BRAND.requesterTitle}</Text>
+                <Text className="text-[11px] text-silver">{displayName ?? '求救者'}</Text>
                 <Text className="text-[11px] text-silver">12 / 28</Text>
               </View>
             </View>

@@ -19,6 +19,8 @@ create table if not exists public.orders (
   min_completed integer not null default 0,
   -- 第十階段：是否請獵人自備工具（true 時加收工具費）
   needs_tools   boolean not null default false,
+  -- 第十一階段：VVIP 急件標記（由 trigger 依發單者實際完成數判定，前端無法偽造）
+  is_vip        boolean not null default false,
   -- 註：精確地址 / 進入指引「不」放這裡 —— 已於第九階段搬到 order_private（DB 級隱私）
   created_at    timestamptz not null default now()
 );
@@ -94,7 +96,7 @@ alter table public.orders add column if not exists hunter_lng double precision;
 -- ╚══════════════════════════════════════════════════════════════════╝
 create table if not exists public.profiles (
   id              uuid primary key references auth.users (id) on delete cascade,
-  display_name    text not null default '鎮宅金主',
+  display_name    text not null default '求救者',
   avatar_url      text,
   rating          numeric not null default 5.0,
   completed_tasks integer not null default 0,
@@ -302,3 +304,42 @@ end;
 $$;
 
 grant execute on function public.settle_escaped(uuid) to authenticated;
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第十一階段：求救者稱號 + VVIP 優先派單（idempotent）             ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+-- 註：求救者「累積完成的呼救數」不另存欄位，直接 count 自己 status=completed
+--     的訂單（orders 的 RLS 已允許 client 讀自己的單）→ 永遠精準、不會漂移。
+--     0 趟「初階驚嚇者」／3 趟「冷靜的課金大佬」／10 趟「VVIP 領域展開」。
+
+-- (1) orders：VVIP 急件標記。VVIP（累積完成 ≥ 10）發單時自動為 true。
+alter table public.orders add column if not exists is_vip boolean not null default false;
+-- 部分索引：任務池排序 / 篩 VIP 用，只索引 true 的少數列
+create index if not exists orders_vip_idx on public.orders (is_vip) where is_vip;
+
+-- (2) VVIP 判定 trigger：發單當下，依「該 client_id 實際完成的呼救數」決定 is_vip。
+--     用 SECURITY DEFINER + BEFORE INSERT 由 DB 計算並覆寫 is_vip → 即使惡意前端
+--     硬塞 is_vip=true 也會被重算，無法偽造 VVIP 身分。門檻 10 與 App 端一致。
+create or replace function public.set_order_vip()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.is_vip := (
+    select count(*) >= 10
+    from public.orders
+    where client_id = new.client_id
+      and status = 'completed'
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_set_order_vip on public.orders;
+create trigger trg_set_order_vip
+  before insert on public.orders
+  for each row
+  execute function public.set_order_vip();
