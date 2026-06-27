@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
  * 觸覺回饋小工具。Web 上 expo-haptics 不適用，一律略過。
  */
 
-/** 重按回饋：用於「乾，出現了！」呼救大按鈕 */
+/** 重按回饋：用於「那個，出現了！」呼救大按鈕 */
 export function tapHaptic() {
   if (Platform.OS === 'web') return;
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);

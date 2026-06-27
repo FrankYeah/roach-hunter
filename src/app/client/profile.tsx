@@ -134,6 +134,24 @@ export default function ClientProfileScreen() {
           <Text className="text-[11px] text-silver">可折抵未來訂單</Text>
         </View>
 
+        {/* 歷史訂單與錢包明細入口 */}
+        <Pressable
+          onPress={() => router.push('/history')}
+          accessibilityRole="button"
+          accessibilityLabel="歷史訂單與錢包明細"
+          className="mt-3 flex-row items-center rounded-3xl bg-white px-4 py-3.5"
+          style={shadowSoft}
+        >
+          <View className="h-10 w-10 items-center justify-center rounded-2xl bg-cream">
+            <MaterialCommunityIcons name="history" size={20} color="#9A763C" />
+          </View>
+          <View className="ml-3 flex-1">
+            <Text className="text-sm font-bold text-ink">歷史訂單與錢包明細</Text>
+            <Text className="text-[11px] text-mute">查看過往呼救、退款與儲值金異動</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#C4BCB0" />
+        </Pressable>
+
         {/* 顯示名稱 */}
         <View className="mb-2 mt-6 flex-row items-center">
           <MaterialCommunityIcons name="account-outline" size={18} color="#2A2521" />

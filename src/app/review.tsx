@@ -9,7 +9,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND, clientLevelFromRequested } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { CURRENT_USER, NEARBY_HUNTERS } from '@/data/hunters';
-import { fetchClientCompletedCount } from '@/lib/orders';
+import { fetchClientCompletedCount, submitRating } from '@/lib/orders';
 import { fetchProfile, type Profile } from '@/lib/profiles';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
@@ -23,8 +23,10 @@ export default function ReviewScreen() {
 
   const configured = isSupabaseConfigured;
   const matchedHunterId = useAppStore((s) => s.matchedHunterId);
+  const orderId = useAppStore((s) => s.orderId);
   const userId = useAppStore((s) => s.userId);
   const resetOrder = useAppStore((s) => s.resetOrder);
+  const [sending, setSending] = useState(false);
 
   // 真實模式：讀取獵人 + 自己的 profile（顯示名稱 / 評分 / 大頭貼）+ 累積完成數
   const [hunterProfile, setHunterProfile] = useState<Profile | null>(null);
@@ -55,6 +57,20 @@ export default function ReviewScreen() {
   const finishAndHome = () => {
     resetOrder();
     router.dismissAll();
+  };
+
+  // 送出評價：真正寫入 ratings 並重算獵人平均星數（RPC），再結案回首頁。
+  // 任何失敗都不阻擋使用者離開 —— 評價是錦上添花，不該卡住結案流程。
+  const submitAndHome = async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      await submitRating(orderId, matchedHunterId, rating);
+    } catch {
+      // 靜默：未跑 SQL / 離線時不阻斷結案
+    } finally {
+      finishAndHome();
+    }
   };
 
   // 稱號解鎖動畫：掛載後彈入
@@ -207,13 +223,14 @@ export default function ReviewScreen() {
       {/* 底部 */}
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
         <Pressable
-          onPress={finishAndHome}
+          onPress={submitAndHome}
+          disabled={sending}
           accessibilityRole="button"
           accessibilityLabel="送出評價，完成"
-          style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+          style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }], opacity: sending ? 0.6 : 1 }]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
-            <Text className="text-lg font-black text-white">送出評價・完成</Text>
+            <Text className="text-lg font-black text-white">{sending ? '送出中…' : '送出評價・完成'}</Text>
           </View>
         </Pressable>
         <Text className="mt-2 text-center text-[11px] text-mute">感謝使用 {BRAND.appName}，祝你一夜好眠</Text>

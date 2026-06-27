@@ -161,6 +161,40 @@ export async function fetchOpenOrders(): Promise<OpenOrderRow[]> {
 }
 
 /**
+ * 我的歷史訂單：撈出我參與過的所有訂單（我是 client 或 hunter），新到舊。
+ * orders 的 RLS 已允許讀「自己發的 / 自己接的」單，故此查詢只會回我自己的紀錄。
+ */
+export async function fetchMyOrders(userId: string | null): Promise<OrderRow[]> {
+  if (!isSupabaseConfigured || !supabase || !userId) return [];
+  const { data } = await supabase
+    .from('orders')
+    .select(OPEN_ORDER_COLS)
+    .or(`client_id.eq.${userId},hunter_id.eq.${userId}`)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  return (data as OrderRow[] | null) ?? [];
+}
+
+/**
+ * 送出評價：呼叫 SECURITY DEFINER RPC `submit_rating`，將這次星數寫入 ratings 表，
+ * 並重新計算「被評價者」在 profiles 的平均星數。RPC 內驗證評價者必須是該訂單的
+ * 當事人（client / hunter），且被評價者為另一方 → 杜絕亂評。回傳新的平均星數。
+ */
+export async function submitRating(
+  orderId: string | null,
+  rateeId: string | null,
+  stars: number,
+): Promise<{ rating: number | null; error: string | null }> {
+  if (!isSupabaseConfigured || !supabase || !orderId || !rateeId) return { rating: null, error: null };
+  const { data, error } = await supabase.rpc('submit_rating', {
+    p_order_id: orderId,
+    p_ratee: rateeId,
+    p_stars: stars,
+  });
+  return { rating: typeof data === 'number' ? data : null, error: error?.message ?? null };
+}
+
+/**
  * 搶單：原子地把 searching 訂單更新為 matched 並寫入 hunter_id。
  * ok=false 代表已被別的獵人搶走（或已不是 searching）。
  */

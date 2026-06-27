@@ -97,6 +97,21 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
   return data ? mapRow(data) : null;
 }
 
+/** 批次讀取多個 profile（歷史頁顯示對方名稱用），回傳 id → Profile 的對照表。*/
+export async function fetchProfilesMap(ids: (string | null)[]): Promise<Record<string, Profile>> {
+  const uniq = Array.from(new Set(ids.filter((x): x is string => !!x)));
+  if (!isSupabaseConfigured || !supabase || uniq.length === 0) return {};
+  const { data } = await supabase
+    .from('profiles')
+    .select(
+      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km, default_location_name, wallet_balance',
+    )
+    .in('id', uniq);
+  const map: Record<string, Profile> = {};
+  for (const row of data ?? []) map[row.id] = mapRow(row);
+  return map;
+}
+
 /** 更新自己的 profile（性別 / 認證狀態 / 接單半徑等）。未設定或欄位未遷移時靜默忽略。*/
 export async function updateProfile(
   userId: string | null,

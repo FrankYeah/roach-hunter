@@ -67,6 +67,7 @@ export default function RootLayout() {
           <Stack.Screen name="matching" options={{ animation: 'fade', gestureEnabled: false }} />
           <Stack.Screen name="status" />
           <Stack.Screen name="review" />
+          <Stack.Screen name="history" />
           <Stack.Screen name="client/profile" />
           <Stack.Screen name="hunter/index" />
           <Stack.Screen name="hunter/task" />

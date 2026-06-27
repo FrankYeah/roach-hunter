@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "乾，出現了！",
+    "name": "那個，出現了！",
     "slug": "roach-hunter",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -38,7 +38,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "「乾，出現了！」需要你的位置，才能在地圖上顯示你家與附近的獵人。"
+          "locationWhenInUsePermission": "「那個，出現了！」需要你的位置，才能在地圖上顯示你家與附近的獵人。"
         }
       ]
     ],

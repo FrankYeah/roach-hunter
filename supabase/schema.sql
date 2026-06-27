@@ -343,3 +343,83 @@ create trigger trg_set_order_vip
   before insert on public.orders
   for each row
   execute function public.set_order_vip();
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第十二階段：評價系統真實寫入（idempotent）                       ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+-- (1) ratings：每筆評價一列。同一張單、同一評價者只能留一筆（可覆蓋）。
+create table if not exists public.ratings (
+  id         uuid primary key default gen_random_uuid(),
+  order_id   uuid not null references public.orders (id) on delete cascade,
+  rater_id   uuid not null references auth.users (id) on delete cascade,
+  ratee_id   uuid not null references auth.users (id) on delete cascade,
+  stars      integer not null check (stars between 1 and 5),
+  created_at timestamptz not null default now(),
+  unique (order_id, rater_id)
+);
+create index if not exists ratings_ratee_idx on public.ratings (ratee_id);
+
+alter table public.ratings enable row level security;
+
+-- 讀取：登入者皆可讀（顯示 / 稽核用）
+drop policy if exists "ratings readable by authenticated" on public.ratings;
+create policy "ratings readable by authenticated"
+  on public.ratings for select to authenticated using (true);
+
+-- 寫入：只能以自己為 rater 新增（實際寫入走下方 RPC，這條是保險）
+drop policy if exists "users insert own ratings" on public.ratings;
+create policy "users insert own ratings"
+  on public.ratings for insert to authenticated
+  with check (auth.uid() = rater_id);
+
+-- (2) submit_rating RPC：寫入/覆蓋這次評分 → 重算被評價者平均 → 更新 profiles.rating。
+--     用 SECURITY DEFINER 是因為「更新對方的 profiles.rating」屬跨人寫入，一般 RLS
+--     不允許；函式內自行驗證評價者與被評價者必須正好是這張單的 client / hunter 兩端，
+--     且不可自評，避免被濫用刷分。回傳重算後的新平均星數。
+create or replace function public.submit_rating(p_order_id uuid, p_ratee uuid, p_stars integer)
+returns numeric
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client uuid;
+  v_hunter uuid;
+  v_rater  uuid := auth.uid();
+  v_avg    numeric;
+begin
+  if p_stars < 1 or p_stars > 5 then
+    raise exception 'stars must be between 1 and 5';
+  end if;
+
+  select client_id, hunter_id into v_client, v_hunter
+  from public.orders where id = p_order_id;
+  if not found then raise exception 'order not found'; end if;
+  if v_hunter is null then raise exception 'order is not matched yet'; end if;
+
+  -- 評價者與被評價者必須是這張單的兩端（client ↔ hunter），且不能自評
+  if v_rater is null
+     or v_rater = p_ratee
+     or v_rater not in (v_client, v_hunter)
+     or p_ratee not in (v_client, v_hunter) then
+    raise exception 'rater/ratee must be the two parties of this order';
+  end if;
+
+  -- 寫入或覆蓋這次評分（同一張單、同一評價者只留最新一次）
+  insert into public.ratings (order_id, rater_id, ratee_id, stars)
+  values (p_order_id, v_rater, p_ratee, p_stars)
+  on conflict (order_id, rater_id)
+  do update set stars = excluded.stars, ratee_id = excluded.ratee_id, created_at = now();
+
+  -- 重算被評價者的平均星數，更新回 profiles（無評價時退回預設 5.0）
+  select round(avg(stars)::numeric, 2) into v_avg
+  from public.ratings where ratee_id = p_ratee;
+
+  update public.profiles set rating = coalesce(v_avg, 5.0) where id = p_ratee;
+  return coalesce(v_avg, 5.0);
+end;
+$$;
+
+grant execute on function public.submit_rating(uuid, uuid, integer) to authenticated;

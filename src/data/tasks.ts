@@ -1,7 +1,7 @@
 import { TARGET_TIERS, type TargetTier } from '@/constants/brand';
 
 /** 平台抽成比例（獵人淨收益 = 訂單金額 × (1 − 此值)） */
-export const PLATFORM_FEE_RATE = 0.2;
+export const PLATFORM_FEE_RATE = 0.15;
 
 /** 由訂單金額計算獵人扣除手續費後的淨收益 */
 export function netEarning(price: number): number {
