@@ -2,7 +2,7 @@ import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/level-badge';
@@ -72,6 +72,7 @@ export default function StatusScreen() {
   const completed = configured ? hunterProfile?.completed_tasks ?? 0 : mockHunter.kills;
   const level = levelFromCompleted(completed);
   const avatarColor = configured ? '#C9A66B' : mockHunter.avatarColor;
+  const avatarUrl = configured ? hunterProfile?.avatar_url ?? null : null;
   const blurb = configured ? '準備好拖鞋，正在趕來' : mockHunter.blurb;
 
   return (
@@ -145,10 +146,14 @@ export default function StatusScreen() {
         {/* 獵人卡片 */}
         <View className="mt-6 flex-row items-center rounded-3xl bg-white p-4" style={shadowSoft}>
           <View
-            className="h-16 w-16 items-center justify-center rounded-full border-[3px] border-white"
+            className="h-16 w-16 items-center justify-center overflow-hidden rounded-full border-[3px] border-white"
             style={{ backgroundColor: avatarColor, ...shadowSoft }}
           >
-            <FontAwesome5 name="shoe-prints" size={24} color="#FFFFFF" />
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={{ width: 58, height: 58 }} />
+            ) : (
+              <FontAwesome5 name="shoe-prints" size={24} color="#FFFFFF" />
+            )}
           </View>
           <View className="ml-4 flex-1">
             <View className="flex-row items-center">

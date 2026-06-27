@@ -2,23 +2,48 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, Text, View } from 'react-native';
+import { Animated, Easing, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MosaicTarget } from '@/components/mosaic-target';
 import { BRAND } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { CURRENT_USER, NEARBY_HUNTERS } from '@/data/hunters';
+import { fetchProfile, type Profile } from '@/lib/profiles';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
-const hunter = NEARBY_HUNTERS[0];
+const mockHunter = NEARBY_HUNTERS[0];
 const PRAISE_TAGS = ['手腳俐落', '很準時', '有禮貌', '善後乾淨', '一擊必殺'];
 
 export default function ReviewScreen() {
   const [rating, setRating] = useState(5);
   const [tags, setTags] = useState<string[]>(['一擊必殺']);
 
+  const configured = isSupabaseConfigured;
+  const matchedHunterId = useAppStore((s) => s.matchedHunterId);
+  const userId = useAppStore((s) => s.userId);
   const resetOrder = useAppStore((s) => s.resetOrder);
+
+  // 真實模式：讀取獵人 + 自己的 profile（顯示名稱 / 評分 / 大頭貼）
+  const [hunterProfile, setHunterProfile] = useState<Profile | null>(null);
+  const [myProfile, setMyProfile] = useState<Profile | null>(null);
+  useEffect(() => {
+    if (!configured) return;
+    let active = true;
+    if (matchedHunterId) fetchProfile(matchedHunterId).then((p) => active && setHunterProfile(p));
+    if (userId) fetchProfile(userId).then((p) => active && setMyProfile(p));
+    return () => {
+      active = false;
+    };
+  }, [configured, matchedHunterId, userId]);
+
+  const hunterName = configured ? hunterProfile?.display_name ?? '你的獵人' : mockHunter.name;
+  const hunterAvatarUrl = configured ? hunterProfile?.avatar_url ?? null : null;
+  const hunterAvatarColor = configured ? '#C9A66B' : mockHunter.avatarColor;
+  const myTitle = configured ? myProfile?.display_name ?? '鎮宅金主' : CURRENT_USER.title;
+  // 獵人「回評」給你的星數 = 你自己 profile 上的即時評分
+  const myRating = configured ? myProfile?.rating ?? 5 : 5;
   // 結案：清空訂單狀態並回到首頁根畫面
   const finishAndHome = () => {
     resetOrder();
@@ -102,7 +127,7 @@ export default function ReviewScreen() {
               />
             </View>
             <View className="ml-4 flex-1">
-              <Text className="text-2xl font-black text-white">{CURRENT_USER.title}</Text>
+              <Text className="text-2xl font-black text-white">{myTitle}</Text>
               <Text className="mt-0.5 text-xs text-silver">
                 累積救援 {CURRENT_USER.rescued + 1} 次・解鎖鎮宅金主特權
               </Text>
@@ -111,7 +136,7 @@ export default function ReviewScreen() {
         </Animated.View>
 
         {/* 幫獵人評分 */}
-        <Text className="mb-3 mt-6 text-base font-black text-ink">幫 {hunter.name} 打個分數</Text>
+        <Text className="mb-3 mt-6 text-base font-black text-ink">幫 {hunterName} 打個分數</Text>
         <View className="rounded-3xl bg-white p-4" style={shadowSoft}>
           <View className="flex-row items-center justify-center">
             {[1, 2, 3, 4, 5].map((n) => (
@@ -155,11 +180,18 @@ export default function ReviewScreen() {
 
         {/* 對方也給了你評價 */}
         <View className="mt-4 flex-row items-center rounded-3xl bg-wood-50 px-4 py-3" style={shadowSoft}>
-          <View className="h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: hunter.avatarColor }}>
-            <Text className="text-base font-black text-white">{hunter.name[0]}</Text>
+          <View
+            className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
+            style={{ backgroundColor: hunterAvatarColor }}
+          >
+            {hunterAvatarUrl ? (
+              <Image source={{ uri: hunterAvatarUrl }} style={{ width: 40, height: 40 }} />
+            ) : (
+              <Text className="text-base font-black text-white">{hunterName[0]}</Text>
+            )}
           </View>
           <View className="ml-3 flex-1">
-            <Text className="text-sm font-bold text-ink">{hunter.name} 也給了你 5.0★</Text>
+            <Text className="text-sm font-bold text-ink">{hunterName} 也給了你 {myRating.toFixed(1)}★</Text>
             <Text className="text-xs text-mute">「金主超好溝通，現場有先收乾淨，讚！」</Text>
           </View>
         </View>

@@ -2,7 +2,7 @@ import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { TARGET_TIERS } from '@/constants/brand';
@@ -10,7 +10,7 @@ import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
-import { completeOrderDb, fetchOrder, tierIdFromSize, type OrderRow } from '@/lib/orders';
+import { completeOrderDb, fetchOrderPrivate, tierIdFromSize, type OrderPrivate } from '@/lib/orders';
 import { bumpCompletedTasks, fetchProfile, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -45,19 +45,20 @@ export default function HunterTaskScreen() {
     : mockTask.distanceM;
   const etaMin = acceptedOrder ? (distanceM != null ? etaMinFromMeters(distanceM) : 10) : mockTask.etaMin;
 
-  // 接單後才解鎖：用 fetchOrder 取回完整列（含精確地址與進入指引）
-  const [detail, setDetail] = useState<OrderRow | null>(null);
+  // 接單後才解鎖：用 fetchOrderPrivate 取私密資料（精確地址 / 進入指引）。
+  // order_private 的 RLS 確保只有已媒合的本獵人拿得到 → DB 級隱私。
+  const [priv, setPriv] = useState<OrderPrivate | null>(null);
   useEffect(() => {
     if (!acceptedOrder?.id) return;
     let active = true;
-    fetchOrder(acceptedOrder.id).then((o) => active && o && setDetail(o));
+    fetchOrderPrivate(acceptedOrder.id).then((p) => active && p && setPriv(p));
     return () => {
       active = false;
     };
   }, [acceptedOrder?.id]);
 
-  const address = acceptedOrder ? detail?.exact_address ?? '解鎖地址中…' : mockTask.address;
-  const entryInstructions = detail?.entry_instructions ?? null;
+  const address = acceptedOrder ? priv?.exact_address ?? '解鎖地址中…' : mockTask.address;
+  const entryInstructions = priv?.entry_instructions ?? null;
 
   // 讀取對方（鎮宅金主）的真實 profile
   const [client, setClient] = useState<Profile | null>(null);
@@ -133,8 +134,12 @@ export default function HunterTaskScreen() {
 
         {/* 目標資訊 */}
         <View className="mt-4 flex-row items-center rounded-3xl bg-white p-4" style={shadowSoft}>
-          <View className="h-12 w-12 items-center justify-center rounded-full bg-wood-300">
-            <FontAwesome5 name="map-marker-alt" size={18} color="#FFFFFF" />
+          <View className="h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-wood-300">
+            {client?.avatar_url ? (
+              <Image source={{ uri: client.avatar_url }} style={{ width: 48, height: 48 }} />
+            ) : (
+              <FontAwesome5 name="map-marker-alt" size={18} color="#FFFFFF" />
+            )}
           </View>
           <View className="ml-3 flex-1">
             <View className="flex-row items-center">

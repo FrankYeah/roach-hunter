@@ -251,14 +251,8 @@ export default function HunterPoolScreen() {
       return;
     }
     successHaptic();
-    // 接單成功才解鎖隱私欄位：先帶安全欄位過去，task 頁再用 fetchOrder 取回精確地址
-    setAcceptedOrder({
-      ...order,
-      status: 'matched',
-      hunter_id: userId ?? null,
-      exact_address: null,
-      entry_instructions: null,
-    });
+    // 接單成功才解鎖隱私：先帶非敏感的訂單列過去，task 頁再用 fetchOrderPrivate 取精確地址
+    setAcceptedOrder({ ...order, status: 'matched', hunter_id: userId ?? null });
     router.push('/hunter/task');
   };
 

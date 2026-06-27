@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -16,9 +16,9 @@ import {
   type TargetTier,
 } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
-import { CURRENT_USER } from '@/data/hunters';
 import { isValidLatLng } from '@/lib/geo';
 import { createOrder, type GenderPref } from '@/lib/orders';
+import { fetchProfile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
 const GENDER_OPTIONS: { id: GenderPref; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -106,7 +106,21 @@ export default function OrderScreen() {
   const userLocation = useAppStore((s) => s.userLocation);
   const [submitting, setSubmitting] = useState(false);
 
+  // 讀取求救者預存的「地址基底」（模糊地址），發單時當底稿降低輸入摩擦
+  const [baseLocation, setBaseLocation] = useState<string | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    fetchProfile(userId).then((p) => active && setBaseLocation(p?.default_location_name ?? null));
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+  const hasBase = !!baseLocation;
+
   const canSubmit = exactAddress.trim().length > 0;
+  // 完整地址 = 模糊基底 + 精確門牌；沒設基底時就用使用者輸入的完整地址
+  const composedAddress = hasBase ? `${baseLocation} ${exactAddress.trim()}` : exactAddress.trim();
 
   const confirm = async () => {
     if (submitting) return;
@@ -127,7 +141,7 @@ export default function OrderScreen() {
       lng: coords?.longitude ?? null,
       genderPref,
       minCompleted: level.minCompleted,
-      exactAddress: exactAddress.trim(),
+      exactAddress: composedAddress,
       entryInstructions: entryInstructions.trim() || null,
     });
     setSubmitting(false);
@@ -159,33 +173,46 @@ export default function OrderScreen() {
       </View>
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-        {/* 地點 */}
-        <View className="mb-5 mt-2 flex-row items-center rounded-3xl bg-cream px-4 py-3" style={shadowSoft}>
+        {/* 地址基底（讀自個人設定的模糊地址）*/}
+        <Pressable
+          onPress={() => router.push('/client/profile')}
+          accessibilityRole="button"
+          accessibilityLabel="編輯地址基底"
+          className="mb-5 mt-2 flex-row items-center rounded-3xl bg-cream px-4 py-3"
+          style={shadowSoft}
+        >
           <View className="h-9 w-9 items-center justify-center rounded-full bg-wood-300">
             <Ionicons name="location" size={18} color="#FFFFFF" />
           </View>
           <View className="ml-3 flex-1">
-            <Text className="text-[11px] text-mute">概略定位（GPS）</Text>
-            <Text className="text-sm font-bold text-ink">{CURRENT_USER.address}</Text>
+            <Text className="text-[11px] text-mute">地址基底（模糊地址・可在個人設定修改）</Text>
+            <Text className={`text-sm font-bold ${hasBase ? 'text-ink' : 'text-mute'}`}>
+              {hasBase ? baseLocation : '尚未設定，點此前往設定'}
+            </Text>
           </View>
           <View className="flex-row items-center">
-            <Ionicons name="navigate-circle" size={14} color="#7FB069" />
-            <Text className="ml-1 text-xs font-semibold text-leaf">已定位</Text>
+            <Ionicons name="create-outline" size={14} color="#9A763C" />
+            <Text className="ml-1 text-xs font-semibold text-wood-600">編輯</Text>
           </View>
-        </View>
+        </Pressable>
 
         {/* 精確地址（必填）+ 進入指引（選填）*/}
-        <Text className="mb-2 text-base font-black text-ink">確認精確地址</Text>
+        <Text className="mb-2 text-base font-black text-ink">{hasBase ? '補上精確門牌' : '確認精確地址'}</Text>
         <View className="mb-2.5 rounded-2xl border-2 border-wood-100 bg-white px-4 py-3" style={shadowSoft}>
-          <Text className="text-[11px] text-mute">門牌・樓層（必填，獵人接單後才看得到）</Text>
+          <Text className="text-[11px] text-mute">
+            {hasBase ? '門牌・樓層（必填，獵人接單後才看得到）' : '完整地址（必填，獵人接單後才看得到）'}
+          </Text>
           <TextInput
             value={exactAddress}
             onChangeText={setExactAddress}
-            placeholder="例如：夏日路 100 號 3 樓"
+            placeholder={hasBase ? '例如：100 號 3 樓之 2' : '例如：夏日路 100 號 3 樓'}
             placeholderTextColor="#C4BCB0"
             accessibilityLabel="精確門牌地址，必填"
             className="mt-1 text-base font-bold text-ink"
           />
+          {hasBase && exactAddress.trim().length > 0 && (
+            <Text className="mt-1.5 text-[11px] text-leaf">完整地址：{composedAddress}</Text>
+          )}
         </View>
         <View className="mb-2.5 rounded-2xl border border-wood-100 bg-white px-4 py-3">
           <Text className="text-[11px] text-mute">進入指引（選填，給警衛 / 大門）</Text>

@@ -15,6 +15,8 @@ export interface Profile {
   police_verified: boolean;
   /** 獵人自訂接單半徑（公里）。高階特權，預設 2。*/
   search_radius_km: number;
+  /** 求救者預存的模糊地址基底（如「夏日公寓」/「安樂區XX街」），發單時當地址底稿。*/
+  default_location_name: string | null;
 }
 
 /** 兩種身分的預設名稱（也用來判斷名稱是否「仍是未自訂的預設值」）*/
@@ -35,6 +37,7 @@ function mapRow(data: {
   id_verified?: boolean | null;
   police_verified?: boolean | null;
   search_radius_km?: number | string | null;
+  default_location_name?: string | null;
 }): Profile {
   return {
     id: data.id,
@@ -46,6 +49,7 @@ function mapRow(data: {
     id_verified: data.id_verified ?? false,
     police_verified: data.police_verified ?? false,
     search_radius_km: data.search_radius_km != null ? Number(data.search_radius_km) : 2,
+    default_location_name: data.default_location_name ?? null,
   };
 }
 
@@ -80,7 +84,7 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
   const { data } = await supabase
     .from('profiles')
     .select(
-      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km',
+      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verified, police_verified, search_radius_km, default_location_name',
     )
     .eq('id', userId)
     .maybeSingle();
@@ -91,7 +95,15 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
 export async function updateProfile(
   userId: string | null,
   patch: Partial<
-    Pick<Profile, 'display_name' | 'gender' | 'id_verified' | 'police_verified' | 'search_radius_km'>
+    Pick<
+      Profile,
+      | 'display_name'
+      | 'gender'
+      | 'id_verified'
+      | 'police_verified'
+      | 'search_radius_km'
+      | 'default_location_name'
+    >
   >,
 ): Promise<void> {
   if (!isSupabaseConfigured || !supabase || !userId) return;

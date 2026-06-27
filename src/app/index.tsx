@@ -139,20 +139,32 @@ export default function HomeScreen() {
             <Text className="mt-0.5 text-xs text-mute">{BRAND.tagline}</Text>
           </View>
         </View>
-        {/* 點頭像即可切換為「獵人」身分 */}
-        <Pressable
-          onPress={switchToHunter}
-          accessibilityRole="button"
-          accessibilityLabel="切換為獵人身分"
-          className="flex-row items-center rounded-full bg-cream px-3 py-1.5"
-          style={shadowSoft}
-        >
-          <View className="h-7 w-7 items-center justify-center rounded-full bg-wood-300">
-            <Ionicons name="home" size={14} color="#FFFFFF" />
-          </View>
-          <Text className="ml-2 text-xs font-bold text-ink">{CURRENT_USER.title}</Text>
-          <MaterialCommunityIcons name="swap-horizontal" size={14} color="#9A8F80" style={{ marginLeft: 6 }} />
-        </Pressable>
+        <View className="flex-row items-center">
+          {/* 個人設定（名稱 / 地址基底 / 性別）*/}
+          <Pressable
+            onPress={() => router.push('/client/profile')}
+            accessibilityRole="button"
+            accessibilityLabel="個人設定"
+            className="mr-2 h-9 w-9 items-center justify-center rounded-full bg-cream"
+            style={shadowSoft}
+          >
+            <Ionicons name="person-circle-outline" size={20} color="#9A763C" />
+          </Pressable>
+          {/* 點頭像即可切換為「獵人」身分 */}
+          <Pressable
+            onPress={switchToHunter}
+            accessibilityRole="button"
+            accessibilityLabel="切換為獵人身分"
+            className="flex-row items-center rounded-full bg-cream px-3 py-1.5"
+            style={shadowSoft}
+          >
+            <View className="h-7 w-7 items-center justify-center rounded-full bg-wood-300">
+              <Ionicons name="home" size={14} color="#FFFFFF" />
+            </View>
+            <Text className="ml-2 text-xs font-bold text-ink">{CURRENT_USER.title}</Text>
+            <MaterialCommunityIcons name="swap-horizontal" size={14} color="#9A8F80" style={{ marginLeft: 6 }} />
+          </Pressable>
+        </View>
       </View>
 
       {/* 地圖 */}

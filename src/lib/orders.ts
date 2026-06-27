@@ -22,10 +22,6 @@ export interface OrderRow {
   /** 求救者的進階篩選條件 */
   gender_pref: GenderPref;
   min_completed: number;
-  /** 精確門牌 / 樓層（隱私：媒合成功前不對外揭露）*/
-  exact_address: string | null;
-  /** 進入指引（給警衛 / 大門，選填）*/
-  entry_instructions: string | null;
   created_at: string;
 }
 
@@ -33,10 +29,21 @@ export interface OrderRow {
 export type GenderPref = 'any' | 'male' | 'female';
 
 /**
- * 任務池對外（status=searching）只揭露的安全欄位 —— 不含精確地址 / 進入指引。
- * 隱私保護：獵人接單前看不到真實地址，接單後才用 fetchOrder 取完整列。
+ * 私密資料（精確地址 / 進入指引）獨立於 order_private 表，由 DB 級 RLS 把關：
+ * status=searching 時 hunter_id 為 NULL → 除了 client 本人，沒人讀得到（含直接打 API）。
+ * 媒合成功後 hunter_id=自己 才解鎖。orders 本身不再持有這些欄位 → 任務池零外洩面。
  */
-export type OpenOrderRow = Omit<OrderRow, 'exact_address' | 'entry_instructions'>;
+export interface OrderPrivate {
+  order_id: string;
+  exact_address: string | null;
+  entry_instructions: string | null;
+}
+
+/**
+ * 任務池對外揭露的安全列。orders 表已不含任何敏感欄位，故等同 OrderRow；
+ * 仍保留明確欄位投影，避免日後新增敏感欄位時意外外洩。
+ */
+export type OpenOrderRow = OrderRow;
 const OPEN_ORDER_COLS =
   'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, created_at';
 
@@ -69,6 +76,7 @@ export async function createOrder(
   input: CreateOrderInput,
 ): Promise<{ id: string | null; error: string | null }> {
   if (!isSupabaseConfigured || !supabase) return { id: null, error: null };
+  // 1) 寫入非敏感的訂單主體（任務池 / Realtime 看的就是這張表）
   const { data, error } = await supabase
     .from('orders')
     .insert({
@@ -80,19 +88,41 @@ export async function createOrder(
       price: input.price,
       gender_pref: input.genderPref,
       min_completed: input.minCompleted,
-      exact_address: input.exactAddress,
-      entry_instructions: input.entryInstructions,
     })
     .select('id')
     .single();
-  return { id: (data?.id as string | undefined) ?? null, error: error?.message ?? null };
+  const orderId = (data?.id as string | undefined) ?? null;
+  if (error || !orderId) return { id: null, error: error?.message ?? null };
+  // 2) 敏感資料寫進 order_private（DB 級 RLS 把關，searching 階段只有本人讀得到）
+  const { error: privErr } = await supabase.from('order_private').insert({
+    order_id: orderId,
+    exact_address: input.exactAddress,
+    entry_instructions: input.entryInstructions,
+  });
+  if (privErr) return { id: orderId, error: privErr.message };
+  return { id: orderId, error: null };
 }
 
-/** 讀取單一訂單 */
+/** 讀取單一訂單（已不含敏感欄位；精確地址請改用 fetchOrderPrivate）*/
 export async function fetchOrder(orderId: string): Promise<OrderRow | null> {
   if (!isSupabaseConfigured || !supabase) return null;
   const { data } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
   return (data as OrderRow | null) ?? null;
+}
+
+/**
+ * 接單後解鎖：讀取訂單的私密資料（精確地址 / 進入指引）。
+ * 受 order_private 的 RLS 保護 —— 只有 client 本人或已媒合的 hunter 拿得到，
+ * 其餘人（含搜尋中的訂單）查詢只會得到空結果。
+ */
+export async function fetchOrderPrivate(orderId: string): Promise<OrderPrivate | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data } = await supabase
+    .from('order_private')
+    .select('order_id, exact_address, entry_instructions')
+    .eq('order_id', orderId)
+    .maybeSingle();
+  return (data as OrderPrivate | null) ?? null;
 }
 
 /**

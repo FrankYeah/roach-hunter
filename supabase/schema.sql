@@ -17,9 +17,7 @@ create table if not exists public.orders (
   -- 求救者的進階篩選：性別偏好 + 最低經驗（completed_tasks）要求
   gender_pref   text not null default 'any' check (gender_pref in ('any', 'male', 'female')),
   min_completed integer not null default 0,
-  -- 精確地址 / 進入指引（隱私：媒合成功前不揭露給其他獵人）
-  exact_address       text,
-  entry_instructions  text,
+  -- 註：精確地址 / 進入指引「不」放這裡 —— 已於第九階段搬到 order_private（DB 級隱私）
   created_at    timestamptz not null default now()
 );
 
@@ -153,11 +151,84 @@ alter table public.profiles add column if not exists police_verified boolean not
 
 
 -- ╔══════════════════════════════════════════════════════════════════╗
--- ║  第八階段：精確地址 / 隱私 + 獵人自訂接單半徑（idempotent）       ║
+-- ║  第八階段：隱私 + 獵人自訂接單半徑（idempotent）                  ║
 -- ╚══════════════════════════════════════════════════════════════════╝
--- orders：精確地址 + 進入指引
-alter table public.orders add column if not exists exact_address text;
-alter table public.orders add column if not exists entry_instructions text;
+-- 註：第八階段原本在 orders 上加 exact_address / entry_instructions，
+--     已於第九階段改為獨立的 order_private 表（見下方），這裡不再補欄位。
 
 -- profiles：獵人自訂接單半徑（公里），預設 2
 alter table public.profiles add column if not exists search_radius_km integer not null default 2;
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第九階段：求救者地址基底 + DB 級終極隱私（idempotent）           ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+-- (1) profiles：求救者可預存的「地址基底」（模糊地址，發單時自動帶入當底稿）
+alter table public.profiles add column if not exists default_location_name text;
+
+-- (2) DB 級終極隱私：把精確地址搬到獨立私密表，orders 本身不再持有敏感欄位。
+--     orders 維持寬鬆 RLS 讓任務池 + Realtime 照常運作；敏感資料則放在這張
+--     「行級鎖死」的表 —— searching 階段（hunter_id 為 NULL）除了 client 本人，
+--     任何人（即使直接打 REST API）都讀不到。order_private 不加入 Realtime publication。
+create table if not exists public.order_private (
+  order_id           uuid primary key references public.orders (id) on delete cascade,
+  exact_address      text,
+  entry_instructions text
+);
+
+alter table public.order_private enable row level security;
+
+-- 寫入：只有訂單的 client 本人
+drop policy if exists "client inserts own order_private" on public.order_private;
+create policy "client inserts own order_private"
+  on public.order_private for insert
+  to authenticated
+  with check (
+    exists (select 1 from public.orders o where o.id = order_id and o.client_id = auth.uid())
+  );
+
+-- 更新：只有訂單的 client 本人
+drop policy if exists "client updates own order_private" on public.order_private;
+create policy "client updates own order_private"
+  on public.order_private for update
+  to authenticated
+  using (
+    exists (select 1 from public.orders o where o.id = order_id and o.client_id = auth.uid())
+  )
+  with check (
+    exists (select 1 from public.orders o where o.id = order_id and o.client_id = auth.uid())
+  );
+
+-- 讀取：只有 client 本人，或【已成功媒合】的 hunter 本人。
+-- searching 階段 hunter_id 為 NULL → 此時除本人外沒有任何人讀得到精確地址（DB 級保證）。
+drop policy if exists "owner or matched hunter reads order_private" on public.order_private;
+create policy "owner or matched hunter reads order_private"
+  on public.order_private for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and (o.client_id = auth.uid() or o.hunter_id = auth.uid())
+    )
+  );
+
+-- (3) 既有資料遷移：把舊版存在 orders 上的精確地址搬進 order_private（欄位還在才跑）。
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'orders' and column_name = 'exact_address'
+  ) then
+    insert into public.order_private (order_id, exact_address, entry_instructions)
+    select id, exact_address, entry_instructions
+    from public.orders
+    where exact_address is not null or entry_instructions is not null
+    on conflict (order_id) do nothing;
+  end if;
+end$$;
+
+-- (4) 移除 orders 上已搬走的敏感欄位，徹底杜絕任務池 / Realtime 的外洩面（無欄位則略過）。
+alter table public.orders drop column if exists exact_address;
+alter table public.orders drop column if exists entry_instructions;
