@@ -254,15 +254,20 @@ export default function HunterPoolScreen() {
   const acceptReal = async (order: OpenOrderRow) => {
     if (acceptingId) return;
     setAcceptingId(order.id);
-    const { ok, error } = await acceptOrder(order.id, userId ?? '', userLocation);
+    const { ok, reason, error } = await acceptOrder(order.id, userId ?? '', userLocation);
     setAcceptingId(null);
     if (error) {
       Alert.alert('接單失敗', error);
       return;
     }
     if (!ok) {
-      Alert.alert('來晚一步', '這張單已經被別的獵人搶走了');
-      refresh();
+      if (reason === 'suspended') {
+        // 爽約 3 次 → 停權 24 小時（report_no_show 記的）
+        Alert.alert('暫停接單中', '你因多次接單未到場被暫停接單，請稍後再試。');
+      } else {
+        Alert.alert('來晚一步', '這張單已經被別的獵人搶走了');
+        refresh();
+      }
       return;
     }
     successHaptic();

@@ -194,47 +194,106 @@ export async function submitRating(
   return { rating: typeof data === 'number' ? data : null, error: error?.message ?? null };
 }
 
+/** 搶單失敗原因：suspended = 爽約停權中；already_taken = 已被別人搶走 */
+export type AcceptFailReason = 'suspended' | 'already_taken' | null;
+
 /**
- * 搶單：原子地把 searching 訂單更新為 matched 並寫入 hunter_id。
- * ok=false 代表已被別的獵人搶走（或已不是 searching）。
+ * 搶單：優先呼叫 SECURITY DEFINER RPC `accept_order` —— 在單一交易內完成
+ * 「條件式改 status + 寫入獵人座標 + 記 matched_at + 停權檢查」。
+ * Postgres row lock 保證同毫秒兩人搶單只有一人成功（另一人命中 0 列）。
+ * 尚未執行第十四階段 SQL（函式不存在）時，優雅退回舊版條件式 UPDATE，
+ * 該路徑同樣具原子性（.eq status searching 的樂觀鎖），App 不會壞。
  */
 export async function acceptOrder(
   orderId: string,
   hunterId: string,
   hunterLoc: LatLng | null,
-): Promise<{ ok: boolean; error: string | null }> {
-  if (!isSupabaseConfigured || !supabase) return { ok: true, error: null };
-  // 1) 原子搶單：只動 status + hunter_id，這樣即使尚未跑 hunter_lat/lng 遷移也不會壞
-  const { data, error } = await supabase
+): Promise<{ ok: boolean; reason: AcceptFailReason; error: string | null }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: true, reason: null, error: null };
+  const loc = isValidLatLng(hunterLoc) ? hunterLoc : null;
+  const { data, error } = await supabase.rpc('accept_order', {
+    p_order_id: orderId,
+    p_lat: loc?.latitude ?? null,
+    p_lng: loc?.longitude ?? null,
+  });
+  if (!error) {
+    const res = (data ?? {}) as { ok?: boolean; reason?: string };
+    if (res.ok === true) return { ok: true, reason: null, error: null };
+    return {
+      ok: false,
+      reason: res.reason === 'suspended' ? 'suspended' : 'already_taken',
+      error: null,
+    };
+  }
+  // RPC 尚未建立以外的錯誤（權限 / 網路）→ 直接回報，不退回舊路徑
+  const missingFn =
+    error.code === 'PGRST202' || error.message.includes('Could not find the function');
+  if (!missingFn) return { ok: false, reason: null, error: error.message };
+  // 舊路徑：條件式 UPDATE 搶單（僅在未跑第十四階段 SQL 時走到）
+  const { data: legacy, error: legacyErr } = await supabase
     .from('orders')
     .update({ status: 'matched', hunter_id: hunterId })
     .eq('id', orderId)
     .eq('status', 'searching') // 只搶仍在 searching 的單 → 避免雙搶
     .select('id')
     .maybeSingle();
-  if (error) return { ok: false, error: error.message };
-  if (!data) return { ok: false, error: null };
-  // 2) best-effort 寫入獵人座標（讓求救端能算 ETA）；欄位若未遷移就忽略錯誤
-  const loc = isValidLatLng(hunterLoc) ? hunterLoc : null;
+  if (legacyErr) return { ok: false, reason: null, error: legacyErr.message };
+  if (!legacy) return { ok: false, reason: 'already_taken', error: null };
+  // best-effort 寫入獵人座標（讓求救端能算 ETA）
   if (loc) {
     await supabase
       .from('orders')
       .update({ hunter_lat: loc.latitude, hunter_lng: loc.longitude })
       .eq('id', orderId);
   }
-  return { ok: true, error: null };
+  return { ok: true, reason: null, error: null };
 }
 
-/** 求救者取消：把訂單標記為 cancelled */
+/**
+ * 求救者取消：把訂單標記為 cancelled。
+ * 狀態守衛：只有 searching / matched 能取消 —— 絕不覆蓋 completed / escaped
+ * 等終態（例如取消鍵按下的同一瞬間獵人剛好結案）。
+ */
 export async function cancelOrder(orderId: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) return;
-  await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
+  await supabase
+    .from('orders')
+    .update({ status: 'cancelled' })
+    .eq('id', orderId)
+    .in('status', ['searching', 'matched']);
 }
 
-/** 獵人回報完成：把訂單標記為 completed */
-export async function completeOrderDb(orderId: string): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) return;
-  await supabase.from('orders').update({ status: 'completed' }).eq('id', orderId);
+/**
+ * 獵人回報完成。狀態守衛：只有仍在 matched 的單能標記 completed ——
+ * 若求救者已在獵人斷線期間取消（cancelled），這裡命中 0 列回傳 ok:false，
+ * 避免把 cancelled 蓋回 completed、污染完成數與等級／VVIP 判定。
+ */
+export async function completeOrderDb(orderId: string): Promise<{ ok: boolean }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: true };
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ status: 'completed' })
+    .eq('id', orderId)
+    .eq('status', 'matched')
+    .select('id')
+    .maybeSingle();
+  return { ok: !error && !!data };
+}
+
+/**
+ * 求救者回報「獵人逾時未到」：呼叫 SECURITY DEFINER RPC `report_no_show`。
+ * RPC 內驗證呼叫者是該單 client、狀態 matched、且媒合已超過 20 分鐘寬限期，
+ * 成立則訂單退回任務池重新媒合，獵人記一次爽約（累積 3 次自動停權 24 小時）。
+ * reason: too_early = 未滿寬限期；unavailable = RPC 尚未建立或呼叫失敗。
+ */
+export async function reportNoShow(
+  orderId: string,
+): Promise<{ ok: boolean; reason: string | null }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: false, reason: 'unconfigured' };
+  const { data, error } = await supabase.rpc('report_no_show', { p_order_id: orderId });
+  if (error) return { ok: false, reason: 'unavailable' };
+  const res = (data ?? {}) as { ok?: boolean; reason?: string };
+  return { ok: res.ok === true, reason: res.reason ?? null };
 }
 
 /**

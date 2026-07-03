@@ -3,7 +3,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatBox } from '@/components/chat-box';
@@ -12,7 +12,7 @@ import { ESCAPE_FEE, levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
 import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
-import { fetchOrder, subscribeOrder, type OrderRow } from '@/lib/orders';
+import { fetchOrder, reportNoShow, subscribeOrder, type OrderRow } from '@/lib/orders';
 import { fetchProfile, type Profile } from '@/lib/profiles';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
@@ -90,6 +90,35 @@ export default function StatusScreen() {
   const goHome = () => {
     resetOrder();
     router.replace('/');
+  };
+
+  // 惡意佔單防禦：獵人逾時未到 → 回報後訂單退回任務池重新媒合。
+  // RPC 內驗證 20 分鐘寬限期 + 呼叫者身分；獵人記一次爽約（3 次停權 24h）。
+  const [reporting, setReporting] = useState(false);
+  const onReportNoShow = () => {
+    if (!orderId || reporting) return;
+    Alert.alert('回報獵人未到場？', '訂單會退回任務池重新媒合，該獵人將被記一次未到場。', [
+      { text: '再等等', style: 'cancel' },
+      {
+        text: '確認回報',
+        style: 'destructive',
+        onPress: async () => {
+          setReporting(true);
+          const { ok, reason } = await reportNoShow(orderId);
+          setReporting(false);
+          if (ok) {
+            router.replace('/matching'); // 回媒合頁等待新獵人接單
+            return;
+          }
+          Alert.alert(
+            '還不能回報',
+            reason === 'too_early'
+              ? '為保障雙方，媒合滿 20 分鐘後才能回報未到場，再給獵人一點時間。'
+              : '目前無法回報，請稍後再試。',
+          );
+        },
+      },
+    ]);
   };
 
   return (
@@ -222,6 +251,22 @@ export default function StatusScreen() {
             <Text className="mt-1 text-xs text-mute">已出動 {completed} 次・{blurb}</Text>
           </View>
         </View>
+
+        {/* 獵人逾時未到 → 回報重新媒合（真實模式、matched 期間才顯示） */}
+        {configured && orderStatusDb === 'matched' && (
+          <Pressable
+            onPress={onReportNoShow}
+            disabled={reporting}
+            accessibilityRole="button"
+            accessibilityLabel="回報獵人逾時未到場，重新媒合"
+            hitSlop={8}
+            className="mt-3 items-center"
+          >
+            <Text className="text-xs font-semibold text-mute underline">
+              {reporting ? '回報中…' : '獵人遲遲未到？回報並重新媒合'}
+            </Text>
+          </Pressable>
+        )}
 
         {/* 即時聊天：只有媒合成功（matched）後才出現 */}
         {showChat && (

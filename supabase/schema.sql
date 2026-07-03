@@ -536,3 +536,201 @@ drop policy if exists "verif read authenticated" on storage.objects;
 create policy "verif read authenticated"
   on storage.objects for select to authenticated
   using (bucket_id = 'verifications');
+
+
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║  第十四階段：資安加固（Unhappy Paths & Security Audit）           ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+-- ── (A) 原子搶單 RPC + 收緊 orders 寫入政策 ─────────────────────────
+-- 漏洞：舊 UPDATE 政策 using(... or status='searching') + with check(true)
+--       讓「任何登入者」都能改寫任一張 searching 單的任何欄位
+--       （price / is_vip / status / client_id …）→ P0 授權破口。
+-- 修法：搶單改走 SECURITY DEFINER RPC（單一交易內完成搶單 + 座標 +
+--       matched_at + 停權檢查），orders 的 UPDATE 政策收緊成
+--       「只有當事人能改自己的單」，徹底拔掉 searching 逃生門。
+
+-- 媒合時間戳（逾時回報 / 自動回收的依據）
+alter table public.orders add column if not exists matched_at timestamptz;
+-- 既有 matched 單補上媒合時間（以建單時間近似），讓逾時機制立即可用
+update public.orders set matched_at = created_at
+ where status = 'matched' and matched_at is null;
+
+-- profiles：爽約計數 + 停權期限（no-show 懲罰、接單資格檢查用）
+alter table public.profiles add column if not exists no_show_count integer not null default 0;
+alter table public.profiles add column if not exists suspended_until timestamptz;
+
+create or replace function public.accept_order(
+  p_order_id uuid,
+  p_lat double precision default null,
+  p_lng double precision default null
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_hunter  uuid := auth.uid();
+  v_updated uuid;
+begin
+  if v_hunter is null then
+    return jsonb_build_object('ok', false, 'reason', 'unauth');
+  end if;
+
+  -- 停權中的獵人不得接單（爽約 3 次 → 停權 24 小時，見 report_no_show）
+  if exists (
+    select 1 from public.profiles
+    where id = v_hunter and suspended_until is not null and suspended_until > now()
+  ) then
+    return jsonb_build_object('ok', false, 'reason', 'suspended');
+  end if;
+
+  -- 原子搶單：條件式 UPDATE。Postgres row lock 會把同毫秒的兩個請求
+  -- 序列化 —— 第二人重新評估 WHERE 時 status 已非 searching → 命中 0 列。
+  update public.orders
+     set status     = 'matched',
+         hunter_id  = v_hunter,
+         hunter_lat = coalesce(p_lat, hunter_lat),
+         hunter_lng = coalesce(p_lng, hunter_lng),
+         matched_at = now()
+   where id = p_order_id
+     and status = 'searching'
+     and hunter_id is null
+  returning id into v_updated;
+
+  if v_updated is null then
+    return jsonb_build_object('ok', false, 'reason', 'already_taken');
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+grant execute on function public.accept_order(uuid, double precision, double precision) to authenticated;
+
+-- 收緊寫入政策：只有當事人（client / hunter）能更新自己的單。
+-- 搶單已改走上方 RPC（definer 權限），不再需要 searching 逃生門。
+drop policy if exists "update own or accepting orders" on public.orders;
+drop policy if exists "parties update own orders" on public.orders;
+create policy "parties update own orders"
+  on public.orders for update
+  to authenticated
+  using (auth.uid() = client_id or auth.uid() = hunter_id)
+  with check (auth.uid() = client_id or auth.uid() = hunter_id);
+
+-- ── (D) 惡意佔單防禦：逾時未到 → 回收重新媒合 + 爽約懲罰 ───────────
+-- 求救者主動回報（MVP 首選，零基礎設施成本）。RPC 內驗證：
+--   呼叫者 = 該單 client、狀態 = matched、已超過 20 分鐘寬限期。
+-- 成立則：訂單退回任務池（searching、清空 hunter 欄位），
+--         獵人 no_show_count +1，累積 3 次自動停權 24 小時。
+create or replace function public.report_no_show(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client  uuid;
+  v_hunter  uuid;
+  v_status  text;
+  v_matched timestamptz;
+  v_grace   constant interval := interval '20 minutes';
+begin
+  -- for update 行鎖：避免與獵人同時按「完成」產生競態
+  select client_id, hunter_id, status, matched_at
+    into v_client, v_hunter, v_status, v_matched
+  from public.orders where id = p_order_id
+  for update;
+
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'not_found');
+  end if;
+  if auth.uid() is distinct from v_client then
+    return jsonb_build_object('ok', false, 'reason', 'forbidden');
+  end if;
+  if v_status <> 'matched' then
+    return jsonb_build_object('ok', false, 'reason', 'not_matched');
+  end if;
+  if v_matched is null or now() - v_matched < v_grace then
+    return jsonb_build_object('ok', false, 'reason', 'too_early');
+  end if;
+
+  -- 退回任務池重新媒合
+  update public.orders
+     set status = 'searching', hunter_id = null,
+         hunter_lat = null, hunter_lng = null, matched_at = null
+   where id = p_order_id;
+
+  -- 記獵人一次爽約；達 3 次自動停權 24 小時
+  if v_hunter is not null then
+    update public.profiles
+       set no_show_count   = no_show_count + 1,
+           suspended_until = case when no_show_count + 1 >= 3
+                                  then now() + interval '24 hours'
+                                  else suspended_until end
+     where id = v_hunter;
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+grant execute on function public.report_no_show(uuid) to authenticated;
+
+-- （選用）pg_cron 自動回收孤兒單：Dashboard → Database → Extensions 啟用
+-- pg_cron 後，取消下面註解執行一次即可（每 5 分鐘掃一次，45 分鐘未動作回收）。
+-- select cron.schedule('expire-stale-matched', '*/5 * * * *', $c$
+--   update public.orders
+--      set status = 'searching', hunter_id = null,
+--          hunter_lat = null, hunter_lng = null, matched_at = null
+--    where status = 'matched' and matched_at < now() - interval '45 minutes';
+-- $c$);
+
+-- ── (C) RLS 越權修補：權限綁定訂單狀態，取消即斷 ────────────────────
+-- 漏洞：cancelOrder 只改 status 不清 hunter_id，而 order_private / messages
+--       的政策只看「hunter_id = 我」→ 被取消的獵人永久保有讀取權，
+--       能繼續查精確地址、繼續收到聊天 Realtime 推播。
+-- 修法：政策加上狀態條件。Realtime postgres_changes 對每個訂閱者每則
+--       事件重新套用 SELECT 政策 → 政策一收緊，殘留的 channel 立即失效。
+
+-- 精確地址：client 本人永遠可讀；獵人僅 matched 期間可讀
+drop policy if exists "owner or matched hunter reads order_private" on public.order_private;
+create policy "owner or matched hunter reads order_private"
+  on public.order_private for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and (o.client_id = auth.uid()
+             or (o.hunter_id = auth.uid() and o.status = 'matched'))
+    )
+  );
+
+-- 聊天讀取：client 永遠可讀；獵人限 matched / completed（保留完工後查對話），
+-- cancelled / escaped 一律斷線
+drop policy if exists "order parties read messages" on public.messages;
+create policy "order parties read messages"
+  on public.messages for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and (o.client_id = auth.uid()
+             or (o.hunter_id = auth.uid() and o.status in ('matched', 'completed')))
+    )
+  );
+
+-- 聊天發送：只有 matched 期間能發，訂單結束就不能再丟訊息
+drop policy if exists "order parties send messages" on public.messages;
+create policy "order parties send messages"
+  on public.messages for insert
+  to authenticated
+  with check (
+    sender_id = auth.uid()
+    and exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and o.status = 'matched'
+        and (o.client_id = auth.uid() or o.hunter_id = auth.uid())
+    )
+  );

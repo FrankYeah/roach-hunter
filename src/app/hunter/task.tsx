@@ -3,7 +3,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, AppState, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatBox } from '@/components/chat-box';
@@ -14,10 +14,13 @@ import { etaMinFromMeters, safeDistanceMeters } from '@/lib/geo';
 import { successHaptic } from '@/lib/haptics';
 import {
   completeOrderDb,
+  fetchOrder,
   fetchOrderPrivate,
   settleEscaped,
+  subscribeOrder,
   tierIdFromSize,
   type OrderPrivate,
+  type OrderRow,
 } from '@/lib/orders';
 import { bumpCompletedTasks, fetchProfile, type Profile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
@@ -78,6 +81,39 @@ export default function HunterTaskScreen() {
   }, [acceptedOrder?.client_id]);
   const clientName = client?.display_name ?? '求救者';
 
+  // 斷線防護網：訂閱訂單狀態 + 回前景時強制 refetch（隧道斷網情境）。
+  // 求救者在獵人斷網期間取消、或訂單被逾時回收（report_no_show）時，
+  // 恢復連線的瞬間立刻得知並退出，不會停在一張已不存在的任務上。
+  // DB 端 completeOrderDb 也有 status='matched' 守衛 → UI + DB 雙保險。
+  useEffect(() => {
+    const id = acceptedOrder?.id;
+    if (!id) return;
+    let done = false;
+    const onRow = (row: OrderRow) => {
+      if (done) return;
+      const cancelled = row.status === 'cancelled';
+      // searching = 被逾時回收；hunter_id 換人 = 回收後已被別人接走
+      const reclaimed =
+        row.status === 'searching' || (row.hunter_id != null && row.hunter_id !== userId);
+      if (!cancelled && !reclaimed) return;
+      done = true;
+      Alert.alert(
+        '任務已結束',
+        cancelled ? '求救者已取消這次呼救。' : '這張單因逾時未到已被重新釋出。',
+      );
+      finishTask();
+      router.replace('/hunter');
+    };
+    const unsub = subscribeOrder(id, onRow);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') fetchOrder(id).then((o) => o && onRow(o));
+    });
+    return () => {
+      unsub();
+      sub.remove();
+    };
+  }, [acceptedOrder?.id, userId, finishTask]);
+
   // 倒數秒數再夾一層：不合理（NaN / 負 / 超過 2 小時）一律退回 10:00
   const initialSecs = Number.isFinite(etaMin) && etaMin > 0 && etaMin <= 120 ? etaMin * 60 : 600;
   const [secs, setSecs] = useState(initialSecs);
@@ -97,14 +133,29 @@ export default function HunterTaskScreen() {
 
   const arrived = secs === 0;
 
-  const complete = () => {
-    successHaptic();
-    if (acceptedOrder) {
-      completeOrderDb(acceptedOrder.id); // 真實模式：標記完成
-      bumpCompletedTasks(userId); // 完成數 +1 → 推進等級
+  const [completing, setCompleting] = useState(false);
+  const complete = async () => {
+    if (completing) return;
+    setCompleting(true);
+    try {
+      if (acceptedOrder) {
+        // 狀態守衛：只有仍在 matched 的單能完成。若求救者已在斷線期間取消，
+        // 這裡會 ok:false → 不記完成數、不推進等級（杜絕 cancelled 被蓋回 completed）。
+        const { ok } = await completeOrderDb(acceptedOrder.id);
+        if (!ok) {
+          Alert.alert('訂單已結束', '這張單已被求救者取消或已結案，無法回報完成。');
+          finishTask();
+          router.replace('/hunter');
+          return;
+        }
+        bumpCompletedTasks(userId); // 真的完成才 +1 → 推進等級
+      }
+      successHaptic();
+      finishTask();
+      router.replace('/hunter');
+    } finally {
+      setCompleting(false);
     }
-    finishTask();
-    router.replace('/hunter');
   };
 
   // 撲空：目標逃逸 → 僅收 $150 車馬費，差額退還發單者儲值金（RPC 原子結算）
@@ -226,13 +277,19 @@ export default function HunterTaskScreen() {
       <View className="border-t border-wood-100 bg-white px-5 pb-6 pt-3">
         <Pressable
           onPress={complete}
+          disabled={completing}
           accessibilityRole="button"
           accessibilityLabel="回報已解決，完成任務"
-          style={({ pressed }) => [shadowSos, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+          style={({ pressed }) => [
+            shadowSos,
+            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: completing ? 0.6 : 1 },
+          ]}
         >
           <View className="flex-row items-center justify-center rounded-[24px] bg-sos py-4">
             <FontAwesome5 name="shoe-prints" size={16} color="#FFFFFF" />
-            <Text className="ml-2 text-lg font-black text-white">回報已解決・完成任務</Text>
+            <Text className="ml-2 text-lg font-black text-white">
+              {completing ? '回報中…' : '回報已解決・完成任務'}
+            </Text>
           </View>
         </Pressable>
         <Pressable
