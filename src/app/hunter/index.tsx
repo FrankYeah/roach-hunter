@@ -20,7 +20,7 @@ import {
   tierIdFromSize,
   type OpenOrderRow,
 } from '@/lib/orders';
-import { ensureProfile, fetchProfile, type Profile } from '@/lib/profiles';
+import { ensureProfile, fetchProfile, setOnlineStatus, type Profile } from '@/lib/profiles';
 import { notifyOrderAccepted, updatePushLocation } from '@/lib/push';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore, type LatLng } from '@/store/useAppStore';
@@ -81,7 +81,15 @@ function itemFromTask(t: SosTask): PoolItem {
   };
 }
 
-function PoolCard({ item, busy, onAccept }: { item: PoolItem; busy: boolean; onAccept: () => void }) {
+function PoolCard({
+  item,
+  busy,
+  onAccept,
+}: {
+  item: PoolItem;
+  busy: boolean;
+  onAccept: () => void;
+}) {
   return (
     <View
       className="mb-3 rounded-3xl bg-white p-4"
@@ -89,7 +97,10 @@ function PoolCard({ item, busy, onAccept }: { item: PoolItem; busy: boolean; onA
     >
       {/* VVIP 急件徽章（金色）*/}
       {item.isVip && (
-        <View className="mb-3 flex-row items-center self-start rounded-full px-3 py-1" style={{ backgroundColor: VIP_GOLD }}>
+        <View
+          className="mb-3 flex-row items-center self-start rounded-full px-3 py-1"
+          style={{ backgroundColor: VIP_GOLD }}
+        >
           <MaterialCommunityIcons name="crown" size={13} color="#FFFFFF" />
           <Text className="ml-1 text-[11px] font-black text-white">VVIP 急件・優先派單</Text>
         </View>
@@ -136,11 +147,19 @@ function PoolCard({ item, busy, onAccept }: { item: PoolItem; busy: boolean; onA
           disabled={busy}
           accessibilityRole="button"
           accessibilityLabel={`接單，${item.label}，淨收益 ${item.net} 元`}
-          style={({ pressed }) => [shadowSos, { transform: [{ scale: pressed ? 0.97 : 1 }], opacity: busy ? 0.6 : 1 }]}
+          style={({ pressed }) => [
+            shadowSos,
+            {
+              transform: [{ scale: pressed ? 0.97 : 1 }],
+              opacity: busy ? 0.6 : 1,
+            },
+          ]}
         >
           <View className="flex-row items-center rounded-2xl bg-sos px-5 py-2.5">
             <FontAwesome5 name="shoe-prints" size={13} color="#FFFFFF" />
-            <Text className="ml-2 text-base font-black text-white">{busy ? '接單中…' : '接單'}</Text>
+            <Text className="ml-2 text-base font-black text-white">
+              {busy ? '接單中…' : '接單'}
+            </Text>
           </View>
         </Pressable>
       </View>
@@ -182,16 +201,41 @@ export default function HunterPoolScreen() {
   }, [userId]);
 
   // 每次回到任務池都重抓自己的 profile（等級 / 性別 / 認證可能在設定頁改過）
+  // 上線接單開關的樂觀覆寫值（null = 以 DB 撈回的 myProfile.is_online 為準）
+  const [onlineOverride, setOnlineOverride] = useState<boolean | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       if (!configured || !userId) return;
       let active = true;
-      fetchProfile(userId).then((p) => active && setMyProfile(p));
+      fetchProfile(userId).then((p) => {
+        if (!active) return;
+        setMyProfile(p);
+        setOnlineOverride(null); // 伺服器狀態到手 → 樂觀覆寫退場，以 DB 為準
+      });
       return () => {
         active = false;
       };
     }, [configured, userId]),
   );
+
+  // ── 上線接單開關：只影響「新單推播」，不影響主動瀏覽 / 接單 ──
+  // 樂觀切換：先改 UI 再寫 DB，失敗還原並提示。mock 模式固定顯示上線。
+  const online = configured ? (onlineOverride ?? myProfile?.is_online ?? false) : true;
+  const toggleOnline = async () => {
+    if (!configured || !userId || myProfile == null) return;
+    const next = !online;
+    selectHaptic();
+    setOnlineOverride(next);
+    const { error } = await setOnlineStatus(userId, next);
+    if (error) {
+      setOnlineOverride(!next);
+      Alert.alert('切換失敗', '請檢查網路後再試一次。');
+      return;
+    }
+    // 上線的同時回報最新位置，讓新單推播的半徑篩選拿到新座標
+    if (next) updatePushLocation(userId, useAppStore.getState().userLocation);
+  };
 
   // 進任務池時回報「最後已知位置」供新單推播做半徑篩選；
   // key 取到小數 3 位（約百米）去抖，位置沒實質移動就不重複寫 DB
@@ -212,7 +256,12 @@ export default function HunterPoolScreen() {
   const next = nextLevel(myCompleted);
   const toNext = next ? Math.max(0, next.minCompleted - myCompleted) : 0;
   const levelProgress = next
-    ? Math.min(100, Math.round(((myCompleted - myLevel.minCompleted) / (next.minCompleted - myLevel.minCompleted)) * 100))
+    ? Math.min(
+        100,
+        Math.round(
+          ((myCompleted - myLevel.minCompleted) / (next.minCompleted - myLevel.minCompleted)) * 100,
+        ),
+      )
     : 100;
 
   // ── 派單過濾：符合自己等級 + 發案者性別要求 ─────
@@ -285,7 +334,11 @@ export default function HunterPoolScreen() {
     // 推播告知求救者「獵人已出發 + ETA」（fire-and-forget，失敗不影響接單）
     notifyOrderAccepted(order.id);
     // 接單成功才解鎖隱私：先帶非敏感的訂單列過去，task 頁再用 fetchOrderPrivate 取精確地址
-    setAcceptedOrder({ ...order, status: 'matched', hunter_id: userId ?? null });
+    setAcceptedOrder({
+      ...order,
+      status: 'matched',
+      hunter_id: userId ?? null,
+    });
     router.push('/hunter/task');
   };
 
@@ -296,7 +349,9 @@ export default function HunterPoolScreen() {
   };
 
   const items: PoolItem[] = (
-    configured ? visibleOrders.map((o) => itemFromOrder(o, userLocation)) : SOS_TASKS.map(itemFromTask)
+    configured
+      ? visibleOrders.map((o) => itemFromOrder(o, userLocation))
+      : SOS_TASKS.map(itemFromTask)
   ).sort((a, b) => Number(b.isVip) - Number(a.isVip)); // VVIP 急件優先置頂（穩定排序保留時間序）
 
   return (
@@ -306,12 +361,28 @@ export default function HunterPoolScreen() {
         <View>
           <View className="flex-row items-center">
             <Text className="text-2xl font-black text-ink">任務池</Text>
-            <View className="ml-2 flex-row items-center rounded-full bg-leaf/15 px-2 py-0.5">
-              <View className="mr-1 h-2 w-2 rounded-full bg-leaf" />
-              <Text className="text-[11px] font-bold text-leaf">上線中</Text>
-            </View>
+            <Pressable
+              onPress={toggleOnline}
+              disabled={!configured || myProfile == null}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: online }}
+              accessibilityLabel={online ? '上線接單中，點擊切換為休息' : '休息中，點擊上線接單'}
+              hitSlop={8}
+              className={`ml-2 flex-row items-center rounded-full px-2.5 py-1 ${
+                online ? 'bg-leaf/15' : 'bg-wood-100'
+              }`}
+            >
+              <View className={`mr-1 h-2 w-2 rounded-full ${online ? 'bg-leaf' : 'bg-wood-300'}`} />
+              <Text className={`text-[11px] font-bold ${online ? 'text-leaf' : 'text-mute'}`}>
+                {online ? '上線接單中' : '休息中'}
+              </Text>
+            </Pressable>
           </View>
-          <Text className="mt-0.5 text-xs text-mute">附近有 {items.length} 筆呼救等你出動・{myLevel.name}</Text>
+          <Text className="mt-0.5 text-xs text-mute">
+            {online
+              ? `附近有 ${items.length} 筆呼救等你出動・${myLevel.name}`
+              : '休息中：不會收到新單推播，仍可手動接單'}
+          </Text>
         </View>
         <View className="flex-row items-center">
           <Pressable
@@ -336,7 +407,11 @@ export default function HunterPoolScreen() {
         </View>
       </View>
 
-      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        className="flex-1 px-5"
+        contentContainerStyle={{ paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* 等級面板 */}
         {configured && (
           <View className="mb-4 rounded-3xl bg-white p-4" style={shadowSoft}>
@@ -348,7 +423,9 @@ export default function HunterPoolScreen() {
               {fullyVerified ? (
                 <View className="flex-row items-center rounded-full bg-silver-light px-2.5 py-1">
                   <MaterialCommunityIcons name="shield-check" size={12} color="#969DA9" />
-                  <Text className="ml-1 text-[11px] font-bold text-silver-dark">完整認證・優先派單</Text>
+                  <Text className="ml-1 text-[11px] font-bold text-silver-dark">
+                    完整認證・優先派單
+                  </Text>
                 </View>
               ) : (
                 <Pressable
@@ -365,16 +442,22 @@ export default function HunterPoolScreen() {
             {next ? (
               <>
                 <View className="mt-3 h-2 overflow-hidden rounded-full bg-wood-100">
-                  <View className="h-2 rounded-full bg-silver" style={{ width: `${levelProgress}%` }} />
+                  <View
+                    className="h-2 rounded-full bg-silver"
+                    style={{ width: `${levelProgress}%` }}
+                  />
                 </View>
                 <Text className="mt-1.5 text-[11px] text-mute">
-                  距離「{next.name}」還差 <Text className="font-bold text-ink">{toNext}</Text> 趟任務
+                  距離「{next.name}」還差 <Text className="font-bold text-ink">{toNext}</Text>{' '}
+                  趟任務
                 </Text>
               </>
             ) : (
               <View className="mt-3 flex-row items-center">
                 <MaterialCommunityIcons name="crown" size={14} color="#969DA9" />
-                <Text className="ml-1 text-[11px] font-bold text-silver-dark">已達最高等級・{myLevel.name}</Text>
+                <Text className="ml-1 text-[11px] font-bold text-silver-dark">
+                  已達最高等級・{myLevel.name}
+                </Text>
               </View>
             )}
           </View>
@@ -385,7 +468,8 @@ export default function HunterPoolScreen() {
           <View className="mb-3 flex-row items-center rounded-2xl bg-wood-50 px-3 py-2.5">
             <Ionicons name="time-outline" size={14} color="#9A763C" />
             <Text className="ml-1.5 flex-1 text-[11px] text-wood-600">
-              有 {pendingCount} 筆新任務優先開放給完整認證的獵人，{DISPATCH_DELAY_MS / 1000} 秒後才對你顯示
+              有 {pendingCount} 筆新任務優先開放給完整認證的獵人，
+              {DISPATCH_DELAY_MS / 1000} 秒後才對你顯示
             </Text>
           </View>
         )}
@@ -417,7 +501,9 @@ export default function HunterPoolScreen() {
                 }
               />
             ))}
-            <Text className="mt-2 text-center text-[11px] text-mute">已經到底囉，等更多金主呼救中…</Text>
+            <Text className="mt-2 text-center text-[11px] text-mute">
+              已經到底囉，等更多金主呼救中…
+            </Text>
           </>
         )}
       </ScrollView>

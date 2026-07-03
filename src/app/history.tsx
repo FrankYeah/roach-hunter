@@ -16,6 +16,7 @@ import { useAppStore } from '@/store/useAppStore';
 const STATUS_META: Record<OrderStatusDb, { label: string; badge: string; text: string }> = {
   searching: { label: '媒合中', badge: 'bg-sos/10', text: 'text-sos' },
   matched: { label: '進行中', badge: 'bg-sos/10', text: 'text-sos' },
+  verifying: { label: '待確認', badge: 'bg-leaf/15', text: 'text-leaf' },
   completed: { label: '已完成', badge: 'bg-leaf/15', text: 'text-leaf' },
   escaped: { label: '目標逃逸', badge: 'bg-wood-100', text: 'text-wood-600' },
   cancelled: { label: '已取消', badge: 'bg-wood-50', text: 'text-mute' },

@@ -5,7 +5,13 @@ import { isValidLatLng } from '@/lib/geo';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { type LatLng } from '@/store/useAppStore';
 
-export type OrderStatusDb = 'searching' | 'matched' | 'completed' | 'cancelled' | 'escaped';
+export type OrderStatusDb =
+  | 'searching'
+  | 'matched'
+  | 'verifying' // 獵人回報已解決，等求救者確認結案（雙重確認結案機制）
+  | 'completed'
+  | 'cancelled'
+  | 'escaped';
 
 /** DB 的 orders 一列（對應 SQL schema）*/
 export interface OrderRow {
@@ -185,13 +191,17 @@ export async function submitRating(
   rateeId: string | null,
   stars: number,
 ): Promise<{ rating: number | null; error: string | null }> {
-  if (!isSupabaseConfigured || !supabase || !orderId || !rateeId) return { rating: null, error: null };
+  if (!isSupabaseConfigured || !supabase || !orderId || !rateeId)
+    return { rating: null, error: null };
   const { data, error } = await supabase.rpc('submit_rating', {
     p_order_id: orderId,
     p_ratee: rateeId,
     p_stars: stars,
   });
-  return { rating: typeof data === 'number' ? data : null, error: error?.message ?? null };
+  return {
+    rating: typeof data === 'number' ? data : null,
+    error: error?.message ?? null,
+  };
 }
 
 /** 搶單失敗原因：suspended = 爽約停權中；already_taken = 已被別人搶走 */
@@ -250,9 +260,11 @@ export async function acceptOrder(
 }
 
 /**
- * 求救者取消：把訂單標記為 cancelled。
- * 狀態守衛：只有 searching / matched 能取消 —— 絕不覆蓋 completed / escaped
- * 等終態（例如取消鍵按下的同一瞬間獵人剛好結案）。
+ * 求救者「免費」取消：只在 searching（獵人還沒接單）時成立。
+ * matched 之後獵人已出發，取消須走 cancelMatchedOrder RPC 收 $100 出勤補償金；
+ * DB 端的狀態機守衛 trigger 也會擋掉 matched 的直接取消 → 違約金繞不過去。
+ * 邊界：按下取消的同一瞬間被接單 → 這裡命中 0 列無事發生，訂閱會把使用者
+ * 帶進 /status，在那裡走違約取消 —— 正好符合「獵人已出發就該補償」的規則。
  */
 export async function cancelOrder(orderId: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) return;
@@ -260,7 +272,24 @@ export async function cancelOrder(orderId: string): Promise<void> {
     .from('orders')
     .update({ status: 'cancelled' })
     .eq('id', orderId)
-    .in('status', ['searching', 'matched']);
+    .eq('status', 'searching');
+}
+
+/**
+ * 求救者「中途」取消（獵人已出發）：呼叫 SECURITY DEFINER RPC，原子完成
+ * status→cancelled + 獵人錢包 +$100 出勤補償 + 其餘預付款退回求救者儲值金。
+ * RPC 內驗證呼叫者是該單 client 且狀態仍為 matched（行鎖防與結案互撞）。
+ */
+export async function cancelMatchedOrder(
+  orderId: string,
+): Promise<{ ok: boolean; reason: string | null }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: true, reason: null };
+  const { data, error } = await supabase.rpc('cancel_matched_order', {
+    p_order_id: orderId,
+  });
+  if (error) return { ok: false, reason: 'unavailable' };
+  const res = (data ?? {}) as { ok?: boolean; reason?: string };
+  return { ok: res.ok === true, reason: res.reason ?? null };
 }
 
 /**
@@ -281,6 +310,47 @@ export async function completeOrderDb(orderId: string): Promise<{ ok: boolean }>
 }
 
 /**
+ * 獵人回報已解決：matched → verifying，進入「等求救者確認」的雙重確認流程。
+ * 直接條件式 UPDATE 即可 —— 這條轉移是狀態機守衛 trigger 明文允許獵人本人走的。
+ * 後備：DB 尚未跑第十六階段 SQL 時，'verifying' 會撞 CHECK 約束（23514），
+ * 優雅退回舊版「直接 completed」行為，App 不會壞。
+ * 回傳 awaiting=true 表示已進入等待確認；false 表示走了舊版直接完成。
+ */
+export async function reportResolved(orderId: string): Promise<{ ok: boolean; awaiting: boolean }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: true, awaiting: false };
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ status: 'verifying' })
+    .eq('id', orderId)
+    .eq('status', 'matched')
+    .select('id')
+    .maybeSingle();
+  if (!error) return { ok: !!data, awaiting: !!data };
+  if (error.code === '23514') {
+    const { ok } = await completeOrderDb(orderId);
+    return { ok, awaiting: false };
+  }
+  return { ok: false, awaiting: false };
+}
+
+/**
+ * 求救者確認完成（雙重確認結案的最後一步）：呼叫 SECURITY DEFINER RPC，
+ * 原子完成 verifying→completed + 獵人錢包入帳 85% 淨收益 + 完成數 +1。
+ * RPC 內驗證呼叫者是該單 client、狀態必須是 verifying。
+ */
+export async function confirmCompletion(
+  orderId: string,
+): Promise<{ ok: boolean; reason: string | null }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: true, reason: null };
+  const { data, error } = await supabase.rpc('confirm_completion', {
+    p_order_id: orderId,
+  });
+  if (error) return { ok: false, reason: 'unavailable' };
+  const res = (data ?? {}) as { ok?: boolean; reason?: string };
+  return { ok: res.ok === true, reason: res.reason ?? null };
+}
+
+/**
  * 求救者回報「獵人逾時未到」：呼叫 SECURITY DEFINER RPC `report_no_show`。
  * RPC 內驗證呼叫者是該單 client、狀態 matched、且媒合已超過 20 分鐘寬限期，
  * 成立則訂單退回任務池重新媒合，獵人記一次爽約（累積 3 次自動停權 24 小時）。
@@ -290,7 +360,9 @@ export async function reportNoShow(
   orderId: string,
 ): Promise<{ ok: boolean; reason: string | null }> {
   if (!isSupabaseConfigured || !supabase) return { ok: false, reason: 'unconfigured' };
-  const { data, error } = await supabase.rpc('report_no_show', { p_order_id: orderId });
+  const { data, error } = await supabase.rpc('report_no_show', {
+    p_order_id: orderId,
+  });
   if (error) return { ok: false, reason: 'unavailable' };
   const res = (data ?? {}) as { ok?: boolean; reason?: string };
   return { ok: res.ok === true, reason: res.reason ?? null };
@@ -306,7 +378,9 @@ export async function reportNoShow(
  */
 export async function settleEscaped(orderId: string): Promise<{ error: string | null }> {
   if (!isSupabaseConfigured || !supabase) return { error: null };
-  const { error } = await supabase.rpc('settle_escaped', { p_order_id: orderId });
+  const { error } = await supabase.rpc('settle_escaped', {
+    p_order_id: orderId,
+  });
   return { error: error?.message ?? null };
 }
 
@@ -331,7 +405,12 @@ export function subscribeOrder(orderId: string, onUpdate: (row: OrderRow) => voi
     .channel(`order:${orderId}:${++channelSeq}`)
     .on(
       'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `id=eq.${orderId}`,
+      },
       (payload: RealtimePostgresChangesPayload<OrderRow>) => onUpdate(payload.new as OrderRow),
     )
     .subscribe();

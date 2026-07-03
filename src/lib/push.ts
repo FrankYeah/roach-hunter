@@ -35,8 +35,7 @@ Notifications.setNotificationHandler({
 
 /** Android 的 Expo Go：SDK 53 起遠端推播已被移除，任何嘗試都會丟錯 → 直接跳過 */
 const isExpoGoAndroid =
-  Platform.OS === 'android' &&
-  Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+  Platform.OS === 'android' && Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
 /**
  * 請求通知權限並取得 Expo push token。
@@ -59,8 +58,7 @@ async function getPushToken(): Promise<string | null> {
       ({ status } = await Notifications.requestPermissionsAsync());
     }
     if (status !== 'granted') return null;
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
     if (!projectId) return null; // 尚未綁定 EAS 專案（npx eas-cli init）
     const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
     return data;
@@ -83,7 +81,11 @@ export function usePushNotifications(userId: string | null): void {
       if (!active || !token) return;
       client
         .from('push_tokens')
-        .upsert({ user_id: userId, token, updated_at: new Date().toISOString() })
+        .upsert({
+          user_id: userId,
+          token,
+          updated_at: new Date().toISOString(),
+        })
         .then(() => {});
     });
     return () => {
@@ -108,7 +110,11 @@ export function updatePushLocation(userId: string | null, loc: LatLng | null): v
   if (!isSupabaseConfigured || !supabase || !userId || !isValidLatLng(loc)) return;
   supabase
     .from('push_tokens')
-    .update({ lat: loc.latitude, lng: loc.longitude, updated_at: new Date().toISOString() })
+    .update({
+      lat: loc.latitude,
+      lng: loc.longitude,
+      updated_at: new Date().toISOString(),
+    })
     .eq('user_id', userId)
     .then(() => {});
 }
@@ -116,6 +122,8 @@ export function updatePushLocation(userId: string | null, loc: LatLng | null): v
 type NotifyPayload =
   | { type: 'new_order'; order_id: string }
   | { type: 'order_accepted'; order_id: string }
+  | { type: 'order_verifying'; order_id: string }
+  | { type: 'order_completed'; order_id: string }
   | { type: 'new_message'; order_id: string; preview: string };
 
 /**
@@ -140,4 +148,14 @@ export function notifyOrderAccepted(orderId: string): void {
 /** 情境 C：送出訊息後通知對方（收件人由 Function 依訂單當事人判定） */
 export function notifyNewMessage(orderId: string, preview: string): void {
   invokeNotify({ type: 'new_message', order_id: orderId, preview });
+}
+
+/** 雙重確認結案：獵人回報已解決 → 通知求救者回 App 按「確認完成」 */
+export function notifyOrderVerifying(orderId: string): void {
+  invokeNotify({ type: 'order_verifying', order_id: orderId });
+}
+
+/** 雙重確認結案：求救者確認完成 → 通知獵人酬勞已入帳 */
+export function notifyOrderCompleted(orderId: string): void {
+  invokeNotify({ type: 'order_completed', order_id: orderId });
 }

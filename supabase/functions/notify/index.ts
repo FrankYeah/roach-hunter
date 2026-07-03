@@ -22,6 +22,8 @@ const FEE_RATE = 0.15;
 type Payload =
   | { type: 'new_order'; order_id: string }
   | { type: 'order_accepted'; order_id: string }
+  | { type: 'order_verifying'; order_id: string }
+  | { type: 'order_completed'; order_id: string }
   | { type: 'new_message'; order_id: string; preview?: string };
 
 interface PushMessage {
@@ -133,9 +135,13 @@ Deno.serve(async (req) => {
       const [{ data: profs }, { data: busyRows }] = await Promise.all([
         admin
           .from('profiles')
-          .select('id, completed_tasks, gender, search_radius_km, suspended_until')
+          .select('id, completed_tasks, gender, search_radius_km, suspended_until, is_online')
           .in('id', ids),
-        admin.from('orders').select('hunter_id').eq('status', 'matched').in('hunter_id', ids),
+        admin
+          .from('orders')
+          .select('hunter_id')
+          .in('status', ['matched', 'verifying'])
+          .in('hunter_id', ids),
       ]);
       const profById = new Map((profs ?? []).map((p) => [p.id, p]));
       const busy = new Set((busyRows ?? []).map((r) => r.hunter_id));
@@ -144,6 +150,7 @@ Deno.serve(async (req) => {
       for (const t of tokens ?? []) {
         const p = profById.get(t.user_id);
         if (!p) continue;
+        if (!p.is_online) continue; // 休息中的獵人不吵（上線開關）
         if (busy.has(t.user_id)) continue; // 手上有任務的獵人不吵
         if (p.suspended_until && new Date(p.suspended_until) > new Date()) continue; // 停權中
         if ((order.min_completed ?? 0) > (p.completed_tasks ?? 0)) continue; // 等級不足
@@ -194,10 +201,55 @@ Deno.serve(async (req) => {
           data: { route: '/status' },
         });
       }
+    } else if (payload.type === 'order_verifying') {
+      // 只有該單獵人、且已成功切到 verifying，才能通知求救者來確認
+      if (order.hunter_id !== uid || order.status !== 'verifying' || !order.client_id) {
+        return json({ error: 'forbidden' }, 403);
+      }
+      const { data: t } = await admin
+        .from('push_tokens')
+        .select('token')
+        .eq('user_id', order.client_id)
+        .maybeSingle();
+      if (t?.token) {
+        pushes.push({
+          to: t.token,
+          title: '✅ 獵人回報已消滅目標！',
+          body: '請確認現場狀況，按下「確認完成」後才會結案撥款。',
+          sound: 'default',
+          channelId: 'default',
+          priority: 'high',
+          data: { route: '/status' },
+        });
+      }
+    } else if (payload.type === 'order_completed') {
+      // 只有該單求救者、且訂單已真正結案，才能通知獵人酬勞入帳
+      if (order.client_id !== uid || order.status !== 'completed' || !order.hunter_id) {
+        return json({ error: 'forbidden' }, 403);
+      }
+      const { data: t } = await admin
+        .from('push_tokens')
+        .select('token')
+        .eq('user_id', order.hunter_id)
+        .maybeSingle();
+      if (t?.token) {
+        const net = Math.round((order.price ?? 0) * (1 - FEE_RATE));
+        pushes.push({
+          to: t.token,
+          title: '🎉 任務完成，酬勞入帳！',
+          body: `求救者已確認完成，$${net} 已存入你的錢包。`,
+          sound: 'default',
+          channelId: 'default',
+          priority: 'high',
+          data: { route: '/hunter' },
+        });
+      }
     } else if (payload.type === 'new_message') {
-      // 只有訂單當事人能觸發；與 messages 的 RLS 同步 —— 只在 matched 期間推
+      // 只有訂單當事人能觸發；與 messages 的 RLS 同步 —— matched / verifying 期間可推
       const isParty = uid === order.client_id || uid === order.hunter_id;
-      if (!isParty || order.status !== 'matched') return json({ error: 'forbidden' }, 403);
+      if (!isParty || !['matched', 'verifying'].includes(order.status)) {
+        return json({ error: 'forbidden' }, 403);
+      }
       const recipient = uid === order.client_id ? order.hunter_id : order.client_id;
       if (recipient) {
         const [{ data: t }, { data: sender }] = await Promise.all([

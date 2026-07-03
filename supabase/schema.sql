@@ -762,3 +762,286 @@ create policy "own push token only"
   to authenticated
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 第十六階段：核心交易體驗
+-- （獵人上線開關 / 中途取消違約金 / 雙重確認結案）
+-- ═══════════════════════════════════════════════════════════════════
+
+-- ── (1) 獵人上線開關 ────────────────────────────────────────────────
+-- 只決定「新單推播」要不要打給他；不影響他主動打開任務池瀏覽與接單。
+alter table public.profiles add column if not exists is_online boolean not null default false;
+
+-- ── (2) 狀態機加入 verifying（獵人回報已解決，等求救者確認結案）────
+alter table public.orders drop constraint if exists orders_status_check;
+alter table public.orders
+  add constraint orders_status_check
+  check (status in ('searching', 'matched', 'verifying', 'completed', 'cancelled', 'escaped'));
+
+-- ── (3) 狀態機守衛 trigger ──────────────────────────────────────────
+-- 錢包結算從此掛在狀態轉移上 →「誰能把狀態改成什麼」就是金流安全邊界。
+-- 一般使用者直接 UPDATE 只允許三條不碰錢的合法邊：
+--   searching → matched   （限新獵人本人：舊版搶單後備路徑）
+--   searching → cancelled （限發單人：獵人還沒出發，免費取消）
+--   matched   → verifying （限該單獵人：回報已解決）
+-- 其餘轉移（completed / escaped / 違約取消 / 退回 searching）一律只能走
+-- SECURITY DEFINER RPC —— RPC 內 set_config 打交易內暗號，trigger 放行。
+-- 這同時堵死「獵人跳過求救者確認、直接把單改成 completed」的漏洞。
+-- service_role（管理後台 / pg_cron）的 auth.uid() 為 null → 完全不受限。
+create or replace function public.guard_order_transition()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then return new; end if;  -- 後台 / 排程
+  if new.status is not distinct from old.status then return new; end if;
+  if current_setting('app.order_transition', true) = 'rpc' then return new; end if;
+  if old.status = 'searching' and new.status = 'matched'
+     and new.hunter_id = auth.uid() then return new; end if;
+  if old.status = 'searching' and new.status = 'cancelled'
+     and auth.uid() = old.client_id then return new; end if;
+  if old.status = 'matched' and new.status = 'verifying'
+     and auth.uid() = old.hunter_id then return new; end if;
+  raise exception 'status transition % -> % not allowed', old.status, new.status;
+end;
+$$;
+
+drop trigger if exists trg_guard_order_transition on public.orders;
+create trigger trg_guard_order_transition
+  before update on public.orders
+  for each row
+  execute function public.guard_order_transition();
+
+-- ── (3a) 既有 RPC 補上交易內暗號（整支重建，商業邏輯不變）───────────
+create or replace function public.report_no_show(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client  uuid;
+  v_hunter  uuid;
+  v_status  text;
+  v_matched timestamptz;
+  v_grace   constant interval := interval '20 minutes';
+begin
+  select client_id, hunter_id, status, matched_at
+    into v_client, v_hunter, v_status, v_matched
+  from public.orders where id = p_order_id
+  for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'not_found');
+  end if;
+  if auth.uid() is distinct from v_client then
+    return jsonb_build_object('ok', false, 'reason', 'forbidden');
+  end if;
+  if v_status <> 'matched' then
+    return jsonb_build_object('ok', false, 'reason', 'not_matched');
+  end if;
+  if v_matched is null or now() - v_matched < v_grace then
+    return jsonb_build_object('ok', false, 'reason', 'too_early');
+  end if;
+  perform set_config('app.order_transition', 'rpc', true);
+  update public.orders
+     set status = 'searching', hunter_id = null,
+         hunter_lat = null, hunter_lng = null, matched_at = null
+   where id = p_order_id;
+  if v_hunter is not null then
+    update public.profiles
+       set no_show_count   = no_show_count + 1,
+           suspended_until = case when no_show_count + 1 >= 3
+                                  then now() + interval '24 hours'
+                                  else suspended_until end
+     where id = v_hunter;
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+grant execute on function public.report_no_show(uuid) to authenticated;
+
+create or replace function public.settle_escaped(p_order_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client  uuid;
+  v_hunter  uuid;
+  v_price   integer;
+  v_status  text;
+  v_refund  integer;
+  v_fee     constant integer := 150; -- 固定車馬費
+begin
+  select client_id, hunter_id, coalesce(price, 0), status
+    into v_client, v_hunter, v_price, v_status
+  from public.orders
+  where id = p_order_id
+  for update;
+  if not found then
+    raise exception 'order not found';
+  end if;
+  if auth.uid() is distinct from v_hunter then
+    raise exception 'only the matched hunter can settle this order';
+  end if;
+  if v_status <> 'matched' then
+    raise exception 'order is not in matched state (current: %)', v_status;
+  end if;
+  v_refund := greatest(v_price - v_fee, 0);
+  perform set_config('app.order_transition', 'rpc', true);
+  update public.orders set status = 'escaped' where id = p_order_id;
+  update public.profiles set wallet_balance = wallet_balance + v_fee where id = v_hunter;
+  if v_client is not null and v_refund > 0 then
+    update public.profiles set wallet_balance = wallet_balance + v_refund where id = v_client;
+  end if;
+end;
+$$;
+grant execute on function public.settle_escaped(uuid) to authenticated;
+
+-- ── (4) 中途取消違約金 RPC ──────────────────────────────────────────
+-- 獵人已出發（matched）時求救者取消：$100 出勤補償金轉入獵人錢包，
+-- 預付款其餘退回求救者儲值金。單一交易原子完成，行鎖防止與結案/撲空互撞。
+create or replace function public.cancel_matched_order(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client  uuid;
+  v_hunter  uuid;
+  v_price   integer;
+  v_status  text;
+  v_refund  integer;
+  v_penalty constant integer := 100; -- 出勤補償金（與 App 端 CANCEL_PENALTY 一致）
+begin
+  select client_id, hunter_id, coalesce(price, 0), status
+    into v_client, v_hunter, v_price, v_status
+  from public.orders where id = p_order_id
+  for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'not_found');
+  end if;
+  if auth.uid() is distinct from v_client then
+    return jsonb_build_object('ok', false, 'reason', 'forbidden');
+  end if;
+  if v_status <> 'matched' then
+    return jsonb_build_object('ok', false, 'reason', 'not_matched');
+  end if;
+  v_refund := greatest(v_price - v_penalty, 0);
+  perform set_config('app.order_transition', 'rpc', true);
+  update public.orders set status = 'cancelled' where id = p_order_id;
+  if v_hunter is not null then
+    update public.profiles set wallet_balance = wallet_balance + v_penalty where id = v_hunter;
+  end if;
+  if v_refund > 0 then
+    update public.profiles set wallet_balance = wallet_balance + v_refund where id = v_client;
+  end if;
+  return jsonb_build_object('ok', true, 'penalty', v_penalty, 'refund', v_refund);
+end;
+$$;
+grant execute on function public.cancel_matched_order(uuid) to authenticated;
+
+-- ── (5) 雙重確認結案 RPC ────────────────────────────────────────────
+-- 只有求救者本人、且訂單在 verifying（獵人已回報解決）時能結案。
+-- 結案 = 狀態改 completed + 獵人錢包入帳 85% 淨收益 + 完成數 +1（推等級），
+-- 完成數改由 DB 端累加 → 即使獵人 App 已關閉，酬勞與等級照樣到位。
+create or replace function public.confirm_completion(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client uuid;
+  v_hunter uuid;
+  v_price  integer;
+  v_status text;
+  v_net    integer;
+begin
+  select client_id, hunter_id, coalesce(price, 0), status
+    into v_client, v_hunter, v_price, v_status
+  from public.orders where id = p_order_id
+  for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'not_found');
+  end if;
+  if auth.uid() is distinct from v_client then
+    return jsonb_build_object('ok', false, 'reason', 'forbidden');
+  end if;
+  if v_status <> 'verifying' then
+    return jsonb_build_object('ok', false, 'reason', 'not_verifying');
+  end if;
+  v_net := round(v_price * 0.85); -- 與 App 端 netEarning() 一致
+  perform set_config('app.order_transition', 'rpc', true);
+  update public.orders set status = 'completed' where id = p_order_id;
+  if v_hunter is not null then
+    update public.profiles
+       set wallet_balance  = wallet_balance + v_net,
+           completed_tasks = completed_tasks + 1
+     where id = v_hunter;
+  end if;
+  return jsonb_build_object('ok', true, 'net', v_net);
+end;
+$$;
+grant execute on function public.confirm_completion(uuid) to authenticated;
+
+-- ── (6) verifying 期間的權限延續 ────────────────────────────────────
+-- 獵人在「等待確認」期間仍可能在現場與求救者溝通 → 地址與聊天不能斷。
+drop policy if exists "owner or matched hunter reads order_private" on public.order_private;
+create policy "owner or matched hunter reads order_private"
+  on public.order_private for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and (o.client_id = auth.uid()
+             or (o.hunter_id = auth.uid() and o.status in ('matched', 'verifying')))
+    )
+  );
+
+drop policy if exists "order parties read messages" on public.messages;
+create policy "order parties read messages"
+  on public.messages for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and (o.client_id = auth.uid()
+             or (o.hunter_id = auth.uid() and o.status in ('matched', 'verifying', 'completed')))
+    )
+  );
+
+drop policy if exists "order parties send messages" on public.messages;
+create policy "order parties send messages"
+  on public.messages for insert
+  to authenticated
+  with check (
+    sender_id = auth.uid()
+    and exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and o.status in ('matched', 'verifying')
+        and (o.client_id = auth.uid() or o.hunter_id = auth.uid())
+    )
+  );
+
+-- （選用）求救者失聯保護：verifying 超過 24 小時自動視為確認結案，
+-- 獵人不會因為對方不按確認而永遠拿不到酬勞。啟用 pg_cron 後取消註解跑一次。
+-- select cron.schedule('auto-confirm-verifying', '0 * * * *', $c$
+--   with done as (
+--     update public.orders
+--        set status = 'completed'
+--      where status = 'verifying'
+--        and matched_at < now() - interval '24 hours'
+--      returning hunter_id, coalesce(price, 0) as price
+--   )
+--   update public.profiles p
+--      set wallet_balance  = p.wallet_balance + round(d.price * 0.85)::int,
+--          completed_tasks = p.completed_tasks + 1
+--     from done d
+--    where p.id = d.hunter_id;
+-- $c$);

@@ -24,6 +24,8 @@ export interface Profile {
   default_location_name: string | null;
   /** 虛擬錢包餘額（新台幣）。超收 / 撲空退款會以儲值金存入，可折抵未來訂單。*/
   wallet_balance: number;
+  /** 獵人上線接單開關。false = 休息中：不收新單推播，但仍可主動開任務池接單。*/
+  is_online: boolean;
 }
 
 /** 兩種身分的預設名稱（也用來判斷名稱是否「仍是未自訂的預設值」）*/
@@ -48,6 +50,7 @@ function mapRow(data: {
   search_radius_km?: number | string | null;
   default_location_name?: string | null;
   wallet_balance?: number | string | null;
+  is_online?: boolean | null;
 }): Profile {
   return {
     id: data.id,
@@ -61,8 +64,13 @@ function mapRow(data: {
     search_radius_km: data.search_radius_km != null ? Number(data.search_radius_km) : 2,
     default_location_name: data.default_location_name ?? null,
     wallet_balance: data.wallet_balance != null ? Number(data.wallet_balance) : 0,
+    is_online: data.is_online ?? false,
   };
 }
+
+/** fetchProfile / fetchProfilesMap 共用的欄位投影（新增欄位記得兩處同步）*/
+const PROFILE_COLS =
+  'id, display_name, avatar_url, rating, completed_tasks, gender, id_verification_status, police_verification_status, search_radius_km, default_location_name, wallet_balance, is_online';
 
 /**
  * 登入 / 進入某身分時確保有一筆 profile：
@@ -94,9 +102,7 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
   if (!isSupabaseConfigured || !supabase || !userId) return null;
   const { data } = await supabase
     .from('profiles')
-    .select(
-      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verification_status, police_verification_status, search_radius_km, default_location_name, wallet_balance',
-    )
+    .select(PROFILE_COLS)
     .eq('id', userId)
     .maybeSingle();
   return data ? mapRow(data) : null;
@@ -106,12 +112,7 @@ export async function fetchProfile(userId: string | null): Promise<Profile | nul
 export async function fetchProfilesMap(ids: (string | null)[]): Promise<Record<string, Profile>> {
   const uniq = Array.from(new Set(ids.filter((x): x is string => !!x)));
   if (!isSupabaseConfigured || !supabase || uniq.length === 0) return {};
-  const { data } = await supabase
-    .from('profiles')
-    .select(
-      'id, display_name, avatar_url, rating, completed_tasks, gender, id_verification_status, police_verification_status, search_radius_km, default_location_name, wallet_balance',
-    )
-    .in('id', uniq);
+  const { data } = await supabase.from('profiles').select(PROFILE_COLS).in('id', uniq);
   const map: Record<string, Profile> = {};
   for (const row of data ?? []) map[row.id] = mapRow(row);
   return map;
@@ -136,6 +137,22 @@ export async function updateProfile(
   await supabase.from('profiles').update(patch).eq('id', userId);
 }
 
+/**
+ * 獵人上線 / 休息切換。只影響「新單推播」是否打給他（Edge Function notify 端過濾），
+ * 不影響主動開任務池瀏覽與接單。回傳錯誤訊息供 UI 還原開關狀態。
+ */
+export async function setOnlineStatus(
+  userId: string | null,
+  isOnline: boolean,
+): Promise<{ error: string | null }> {
+  if (!isSupabaseConfigured || !supabase || !userId) return { error: null };
+  const { error } = await supabase
+    .from('profiles')
+    .update({ is_online: isOnline })
+    .eq('id', userId);
+  return { error: error?.message ?? null };
+}
+
 /** 完成任務後將自己的 completed_tasks +1（read-modify-write，MVP 夠用）*/
 export async function bumpCompletedTasks(userId: string | null): Promise<void> {
   if (!isSupabaseConfigured || !supabase || !userId) return;
@@ -145,5 +162,8 @@ export async function bumpCompletedTasks(userId: string | null): Promise<void> {
     .eq('id', userId)
     .maybeSingle();
   const current = data ? Number(data.completed_tasks) : 0;
-  await supabase.from('profiles').update({ completed_tasks: current + 1 }).eq('id', userId);
+  await supabase
+    .from('profiles')
+    .update({ completed_tasks: current + 1 })
+    .eq('id', userId);
 }

@@ -118,6 +118,9 @@ export const TARGET_TIERS: TargetTier[] = [
 /** 撲空（目標逃逸）時獵人可獲得的固定車馬費；發單者預付的差額退成儲值金 */
 export const ESCAPE_FEE = 150;
 
+/** 獵人已出發（matched）後求救者中途取消的出勤補償金：轉入獵人錢包，其餘退儲值金 */
+export const CANCEL_PENALTY = 100;
+
 /** 工具準備：選「請獵人自備（拖鞋 / 殺蟲劑 / 塑膠袋）」時的加價 */
 export const TOOL_PREP_FEE = 35;
 
