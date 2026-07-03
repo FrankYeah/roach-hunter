@@ -11,7 +11,7 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { TARGET_TIERS, VIP_GOLD, levelFromCompleted, nextLevel } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { PLATFORM_FEE_RATE, SOS_TASKS, netEarning, tierOf, type SosTask } from '@/data/tasks';
-import { safeDistanceMeters } from '@/lib/geo';
+import { isValidLatLng, safeDistanceMeters } from '@/lib/geo';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
 import {
   acceptOrder,
@@ -21,6 +21,7 @@ import {
   type OpenOrderRow,
 } from '@/lib/orders';
 import { ensureProfile, fetchProfile, type Profile } from '@/lib/profiles';
+import { notifyOrderAccepted, updatePushLocation } from '@/lib/push';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore, type LatLng } from '@/store/useAppStore';
 
@@ -192,6 +193,16 @@ export default function HunterPoolScreen() {
     }, [configured, userId]),
   );
 
+  // 進任務池時回報「最後已知位置」供新單推播做半徑篩選；
+  // key 取到小數 3 位（約百米）去抖，位置沒實質移動就不重複寫 DB
+  const locKey = isValidLatLng(userLocation)
+    ? `${userLocation.latitude.toFixed(3)},${userLocation.longitude.toFixed(3)}`
+    : null;
+  useEffect(() => {
+    if (!configured || !userId || !locKey) return;
+    updatePushLocation(userId, useAppStore.getState().userLocation);
+  }, [configured, userId, locKey]);
+
   // ── 等級 / 認證 ──────────────────────────────
   const myCompleted = myProfile?.completed_tasks ?? 0;
   const myLevel = levelFromCompleted(myCompleted);
@@ -271,6 +282,8 @@ export default function HunterPoolScreen() {
       return;
     }
     successHaptic();
+    // 推播告知求救者「獵人已出發 + ETA」（fire-and-forget，失敗不影響接單）
+    notifyOrderAccepted(order.id);
     // 接單成功才解鎖隱私：先帶非敏感的訂單列過去，task 頁再用 fetchOrderPrivate 取精確地址
     setAcceptedOrder({ ...order, status: 'matched', hunter_id: userId ?? null });
     router.push('/hunter/task');

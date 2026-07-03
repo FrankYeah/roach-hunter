@@ -1,0 +1,6 @@
+# Supabase CLI 設定（只用於部署 Edge Functions；DB schema 仍走 SQL Editor 貼上）
+project_id = "roach-hunter"
+
+# notify：推播發送。verify_jwt = true → 未帶有效登入 JWT 的請求在平台層就被擋下
+[functions.notify]
+verify_jwt = true

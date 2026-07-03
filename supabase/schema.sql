@@ -734,3 +734,31 @@ create policy "order parties send messages"
         and (o.client_id = auth.uid() or o.hunter_id = auth.uid())
     )
   );
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 第十五階段：推播通知（Expo Push Notifications）
+-- ═══════════════════════════════════════════════════════════════════
+-- 設計決策：token 不放 profiles。profiles 的 select 政策是「所有登入者可讀」
+-- （獵人卡片要顯示對方名字/星等），Expo push token 一旦可被他人讀取，
+-- 任何人都能拿去打 exp.host API 對該裝置無限發垃圾推播。
+-- 因此 token 收進獨立的 push_tokens 表，RLS 僅本人可讀寫；
+-- 發送方（Edge Function `notify`）用 service_role 讀取，天生繞過 RLS。
+-- lat/lng 是獵人「最後已知位置」：情境 A（新單廣播）用來做半徑篩選與
+-- 「距離你 X 公尺」文案；由 App 進任務池時順手更新，不做背景追蹤。
+
+create table if not exists public.push_tokens (
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  token      text not null,
+  lat        double precision,
+  lng        double precision,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.push_tokens enable row level security;
+
+drop policy if exists "own push token only" on public.push_tokens;
+create policy "own push token only"
+  on public.push_tokens for all
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

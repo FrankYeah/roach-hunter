@@ -7,6 +7,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ensureProfile } from '@/lib/profiles';
+import { usePushNotifications } from '@/lib/push';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -15,6 +16,10 @@ export default function RootLayout() {
   const authReady = useAppStore((s) => s.authReady);
   const applySession = useAppStore((s) => s.applySession);
   const setAuthReady = useAppStore((s) => s.setAuthReady);
+  const userId = useAppStore((s) => s.userId);
+
+  // 登入後註冊推播 token + 監聽「點擊推播 → 導頁」；登出 / 未登入時無事
+  usePushNotifications(userId);
 
   // 冷啟動：還原 Supabase session（未設定 Supabase 則直接就緒，走 mock）
   useEffect(() => {

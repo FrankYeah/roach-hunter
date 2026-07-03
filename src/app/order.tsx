@@ -30,6 +30,7 @@ import {
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { isValidLatLng } from '@/lib/geo';
 import { createOrder, type GenderPref } from '@/lib/orders';
+import { notifyNewOrder } from '@/lib/push';
 import { fetchProfile } from '@/lib/profiles';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -176,6 +177,8 @@ export default function OrderScreen() {
         Alert.alert('付款或建立訂單失敗', error);
         return;
       }
+      // 廣播推播給附近符合條件的獵人（fire-and-forget，失敗不影響發單）
+      if (id) notifyNewOrder(id);
       setShowPayment(false);
       startMatching({ tierId, addonIds, total });
       setOrderId(id);

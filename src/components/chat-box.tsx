@@ -4,6 +4,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { shadowSoft } from '@/constants/shadows';
 import { fetchMessages, sendMessage, subscribeMessages, type Message } from '@/lib/chat';
+import { notifyNewMessage } from '@/lib/push';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 /**
@@ -55,6 +56,7 @@ export function ChatBox({
       const { error } = await sendMessage(orderId, selfId, text);
       setSending(false);
       if (error) setInput(text); // 失敗還原輸入；成功靠 Realtime 回補訊息
+      else notifyNewMessage(orderId, text); // 推播給對方（離線也收得到，fire-and-forget）
     } else {
       // mock：本地回顯
       setMessages((prev) => [
