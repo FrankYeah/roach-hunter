@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -204,7 +204,24 @@ export default function HistoryScreen() {
                         ? '淨收益'
                         : '花費';
               return (
-                <View key={o.id} className="mb-3 rounded-3xl bg-white p-4" style={shadowSoft}>
+                <Pressable
+                  key={o.id}
+                  onPress={() =>
+                    // 型別斷言：/order-detail 是新路由，expo 的 typed-routes 產物只在
+                    // `expo start` 時重生，本機開發即會正確識別（.expo/types 為 build 產物）。
+                    router.push({
+                      pathname: '/order-detail',
+                      params: { id: o.id },
+                    } as unknown as Href)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`查看${sizeLabel(o.target_size)}的目標訂單詳情`}
+                  className="mb-3 rounded-3xl bg-white p-4"
+                  style={({ pressed }) => [
+                    shadowSoft,
+                    { transform: [{ scale: pressed ? 0.99 : 1 }] },
+                  ]}
+                >
                   <View className="flex-row items-center justify-between">
                     <View className="flex-row items-center">
                       {/* 身分標籤：出動（獵人）/ 求救（求救者）*/}
@@ -252,7 +269,11 @@ export default function HistoryScreen() {
                       <Text className="text-[10px] text-mute">{amountTag}</Text>
                     </View>
                   </View>
-                </View>
+                  <View className="mt-2 flex-row items-center justify-end">
+                    <Text className="text-[11px] text-mute">查看詳情</Text>
+                    <Ionicons name="chevron-forward" size={12} color="#C4BCB0" />
+                  </View>
+                </Pressable>
               );
             })
           )}

@@ -215,6 +215,21 @@ export async function submitRating(
   };
 }
 
+/** 我對某訂單已給過的星數（沒給過回 null）。ratings 對登入者可讀，故可預載評價狀態。*/
+export async function fetchMyRating(
+  orderId: string | null,
+  userId: string | null,
+): Promise<number | null> {
+  if (!isSupabaseConfigured || !supabase || !orderId || !userId) return null;
+  const { data } = await supabase
+    .from('ratings')
+    .select('stars')
+    .eq('order_id', orderId)
+    .eq('rater_id', userId)
+    .maybeSingle();
+  return data ? Number((data as { stars: number }).stars) : null;
+}
+
 /** 搶單失敗原因：suspended = 爽約停權中；already_taken = 已被別人搶走 */
 export type AcceptFailReason = 'suspended' | 'already_taken' | null;
 
