@@ -1045,3 +1045,170 @@ create policy "order parties send messages"
 --     from done d
 --    where p.id = d.hunter_id;
 -- $c$);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 第十七階段：儲值金帳本 + 取消原因（金流透明化）
+-- ═══════════════════════════════════════════════════════════════════
+-- 痛點：wallet_balance 只是一個整數，錢怎麼來的沒有逐筆帳 → 有爭議無法對帳。
+-- 解法：每一次動到 wallet_balance 都同一交易寫一列 wallet_transactions。
+-- 錢包目前「只進不出」（撲空退款 / 中途取消退款 / 結案酬勞 / 出勤補償），
+-- 故 amount 一律正數；未來若加「用儲值金折抵訂單」再引入負數即可。
+
+create table if not exists public.wallet_transactions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  order_id   uuid references public.orders(id) on delete set null,
+  kind       text not null, -- task_payout / escape_fee / escape_refund / cancel_penalty / cancel_refund / adjustment
+  amount     integer not null, -- 對 wallet_balance 的變化量（目前皆為正）
+  memo       text,
+  created_at timestamptz not null default now()
+);
+create index if not exists wallet_tx_user_idx
+  on public.wallet_transactions (user_id, created_at desc);
+
+alter table public.wallet_transactions enable row level security;
+-- 只讀自己的帳；沒有 insert policy → 一般使用者無法自行記帳，
+-- 只有下方 SECURITY DEFINER 的結算 RPC（繞過 RLS）與後台 service_role 能寫。
+drop policy if exists "read own wallet tx" on public.wallet_transactions;
+create policy "read own wallet tx"
+  on public.wallet_transactions for select
+  to authenticated
+  using (user_id = auth.uid());
+
+-- 取消原因：區分「媒合前免費取消」與「已出發中途取消（收 $100）」，
+-- 讓歷史頁能正確標示、獵人看得到自己賺到的出勤補償。
+alter table public.orders add column if not exists cancel_reason text;
+
+-- ── 三支結算 RPC 整支重建：加寫帳本（商業邏輯與金額不變）──────────────
+create or replace function public.settle_escaped(p_order_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client  uuid;
+  v_hunter  uuid;
+  v_price   integer;
+  v_status  text;
+  v_refund  integer;
+  v_fee     constant integer := 150; -- 固定車馬費
+begin
+  select client_id, hunter_id, coalesce(price, 0), status
+    into v_client, v_hunter, v_price, v_status
+  from public.orders where id = p_order_id
+  for update;
+  if not found then
+    raise exception 'order not found';
+  end if;
+  if auth.uid() is distinct from v_hunter then
+    raise exception 'only the matched hunter can settle this order';
+  end if;
+  if v_status <> 'matched' then
+    raise exception 'order is not in matched state (current: %)', v_status;
+  end if;
+  v_refund := greatest(v_price - v_fee, 0);
+  perform set_config('app.order_transition', 'rpc', true);
+  update public.orders set status = 'escaped' where id = p_order_id;
+  -- 獵人 +車馬費
+  update public.profiles set wallet_balance = wallet_balance + v_fee where id = v_hunter;
+  insert into public.wallet_transactions (user_id, order_id, kind, amount, memo)
+    values (v_hunter, p_order_id, 'escape_fee', v_fee, '撲空車馬費');
+  -- 求救者退差額
+  if v_client is not null and v_refund > 0 then
+    update public.profiles set wallet_balance = wallet_balance + v_refund where id = v_client;
+    insert into public.wallet_transactions (user_id, order_id, kind, amount, memo)
+      values (v_client, p_order_id, 'escape_refund', v_refund, '撲空退款・差額退儲值金');
+  end if;
+end;
+$$;
+grant execute on function public.settle_escaped(uuid) to authenticated;
+
+create or replace function public.cancel_matched_order(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client  uuid;
+  v_hunter  uuid;
+  v_price   integer;
+  v_status  text;
+  v_refund  integer;
+  v_penalty constant integer := 100; -- 出勤補償金
+begin
+  select client_id, hunter_id, coalesce(price, 0), status
+    into v_client, v_hunter, v_price, v_status
+  from public.orders where id = p_order_id
+  for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'not_found');
+  end if;
+  if auth.uid() is distinct from v_client then
+    return jsonb_build_object('ok', false, 'reason', 'forbidden');
+  end if;
+  if v_status <> 'matched' then
+    return jsonb_build_object('ok', false, 'reason', 'not_matched');
+  end if;
+  v_refund := greatest(v_price - v_penalty, 0);
+  perform set_config('app.order_transition', 'rpc', true);
+  update public.orders
+     set status = 'cancelled', cancel_reason = 'client_cancelled_matched'
+   where id = p_order_id;
+  if v_hunter is not null then
+    update public.profiles set wallet_balance = wallet_balance + v_penalty where id = v_hunter;
+    insert into public.wallet_transactions (user_id, order_id, kind, amount, memo)
+      values (v_hunter, p_order_id, 'cancel_penalty', v_penalty, '求救者中途取消・出勤補償');
+  end if;
+  if v_refund > 0 then
+    update public.profiles set wallet_balance = wallet_balance + v_refund where id = v_client;
+    insert into public.wallet_transactions (user_id, order_id, kind, amount, memo)
+      values (v_client, p_order_id, 'cancel_refund', v_refund, '中途取消・差額退儲值金');
+  end if;
+  return jsonb_build_object('ok', true, 'penalty', v_penalty, 'refund', v_refund);
+end;
+$$;
+grant execute on function public.cancel_matched_order(uuid) to authenticated;
+
+create or replace function public.confirm_completion(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client uuid;
+  v_hunter uuid;
+  v_price  integer;
+  v_status text;
+  v_net    integer;
+begin
+  select client_id, hunter_id, coalesce(price, 0), status
+    into v_client, v_hunter, v_price, v_status
+  from public.orders where id = p_order_id
+  for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'not_found');
+  end if;
+  if auth.uid() is distinct from v_client then
+    return jsonb_build_object('ok', false, 'reason', 'forbidden');
+  end if;
+  if v_status <> 'verifying' then
+    return jsonb_build_object('ok', false, 'reason', 'not_verifying');
+  end if;
+  v_net := round(v_price * 0.85); -- 與 App 端 netEarning() 一致
+  perform set_config('app.order_transition', 'rpc', true);
+  update public.orders set status = 'completed' where id = p_order_id;
+  if v_hunter is not null then
+    update public.profiles
+       set wallet_balance  = wallet_balance + v_net,
+           completed_tasks = completed_tasks + 1
+     where id = v_hunter;
+    insert into public.wallet_transactions (user_id, order_id, kind, amount, memo)
+      values (v_hunter, p_order_id, 'task_payout', v_net, '任務完成酬勞');
+  end if;
+  return jsonb_build_object('ok', true, 'net', v_net);
+end;
+$$;
+grant execute on function public.confirm_completion(uuid) to authenticated;

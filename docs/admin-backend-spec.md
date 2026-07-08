@@ -101,6 +101,7 @@ Next.js Server ──(service_role key, 繞過 RLS)──► Postgres / Storage 
 | `location_lat/lng` | float8 | 求救者家的座標 |
 | `hunter_lat/lng` | float8 | 獵人接單當下座標（算 ETA 用） |
 | `matched_at` | timestamptz \| null | 媒合成功時間（爽約 20 分鐘寬限期的計時起點） |
+| `cancel_reason` | text \| null | `client_cancelled_searching`(媒合前免費取消) / `client_cancelled_matched`(已出發中途取消，收 $100) |
 | `created_at` | timestamptz | 建單時間 |
 
 ### `order_private` — 敏感資料（糾紛查證才看）
@@ -136,6 +137,14 @@ Next.js Server ──(service_role key, 繞過 RLS)──► Postgres / Storage 
 
 ### `messages` — 聊天記錄（糾紛查證）
 `id, order_id, sender_id, content, created_at`。依 `order_id` 撈出整串對話。
+
+### `wallet_transactions` — 儲值金帳本（對帳依據）
+`id, user_id, order_id, kind, amount(對 wallet_balance 的變化量，目前皆為正), memo, created_at`。
+- `kind`：`task_payout`(完成酬勞) / `escape_fee`(撲空車馬費) / `escape_refund`(撲空退款) /
+  `cancel_penalty`(中途取消出勤補償) / `cancel_refund`(中途取消退款) / `adjustment`(後台人工調整)。
+- 每次 DB 端結算 RPC 動到 `wallet_balance` 都同交易寫一列 → `sum(amount)` 應等於 `wallet_balance`。
+- 後台若人工調整 `wallet_balance`，**請補寫一列 `kind='adjustment'`**（含 memo 原因），帳才不會對不上。
+- 客服對帳、退款爭議都查這張表。
 
 ### `push_tokens` — 推播權杖（敏感，後台不要顯示 token 本身）
 `user_id(pk), token, lat, lng, updated_at`。Expo push token + 使用者最後已知位置。
@@ -225,7 +234,8 @@ orders: id uuid, client_id uuid, hunter_id uuid, target_size text(小/大/飛),
   # verifying = 獵人回報已解決、待求救者確認結案
   gender_pref text(any|male|female), min_completed int, needs_tools bool,
   is_vip bool, location_lat/lng float8, hunter_lat/lng float8,
-  matched_at timestamptz, created_at timestamptz
+  matched_at timestamptz, cancel_reason text, created_at timestamptz
+  # cancel_reason = client_cancelled_searching(免費) / client_cancelled_matched(收$100)
 order_private: order_id uuid, exact_address text, entry_instructions text   # 敏感
 profiles: id uuid(=auth.users.id), display_name text, avatar_url text, rating numeric,
   completed_tasks int, gender text, id_verification_status text(none|pending|verified|rejected),
@@ -236,6 +246,8 @@ ratings: id, order_id, rater_id, ratee_id, stars int(1-5), created_at
 messages: id, order_id, sender_id, content text, created_at
 push_tokens: user_id uuid(pk), token text, lat/lng float8, updated_at timestamptz
   # Expo push token，機密：介面只顯示有/無，永遠不要把 token 印在畫面上
+wallet_transactions: id, user_id uuid, order_id uuid, kind text, amount int, memo text, created_at
+  # 儲值金帳本；sum(amount) 應 = profiles.wallet_balance。後台手動改錢包要補一列 kind='adjustment'
 Storage bucket 'verifications'（私有）：KYC 證件照，路徑 {userId}/id.jpg、{userId}/police.jpg
 client_id / hunter_id / sender_id 都對應 auth.users.id；
 要顯示 email/名字時用 supabase.auth.admin.listUsers() 或 join profiles.display_name。

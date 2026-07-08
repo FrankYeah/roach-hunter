@@ -32,6 +32,8 @@ export interface OrderRow {
   needs_tools: boolean;
   /** 是否為 VVIP 急件（由 DB trigger 依發單者實際完成數判定，前端無法偽造）*/
   is_vip: boolean;
+  /** 取消原因：client_cancelled_searching（免費）/ client_cancelled_matched（收 $100）*/
+  cancel_reason: string | null;
   created_at: string;
 }
 
@@ -55,7 +57,7 @@ export interface OrderPrivate {
  */
 export type OpenOrderRow = OrderRow;
 const OPEN_ORDER_COLS =
-  'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, needs_tools, is_vip, created_at';
+  'id, client_id, hunter_id, target_size, status, location_lat, location_lng, hunter_lat, hunter_lng, price, gender_pref, min_completed, needs_tools, is_vip, cancel_reason, created_at';
 
 /** tier id → DB target_size 短碼（對應 SQL 的 CHECK 限制）*/
 const TARGET_SIZE: Record<TargetTier['id'], OrderRow['target_size']> = {
@@ -270,7 +272,7 @@ export async function cancelOrder(orderId: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) return;
   await supabase
     .from('orders')
-    .update({ status: 'cancelled' })
+    .update({ status: 'cancelled', cancel_reason: 'client_cancelled_searching' })
     .eq('id', orderId)
     .eq('status', 'searching');
 }

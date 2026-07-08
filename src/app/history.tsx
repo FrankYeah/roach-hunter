@@ -5,11 +5,12 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ESCAPE_FEE, TARGET_TIERS } from '@/constants/brand';
+import { CANCEL_PENALTY, ESCAPE_FEE, TARGET_TIERS } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { netEarning } from '@/data/tasks';
 import { fetchMyOrders, tierIdFromSize, type OrderRow, type OrderStatusDb } from '@/lib/orders';
 import { fetchProfile, fetchProfilesMap, type Profile } from '@/lib/profiles';
+import { fetchWalletTransactions, WALLET_KIND_LABEL, type WalletTx } from '@/lib/wallet';
 import { useAppStore } from '@/store/useAppStore';
 
 /** 訂單狀態 → 中文標籤 + 配色（淺木質調）*/
@@ -40,6 +41,7 @@ export default function HistoryScreen() {
   const [me, setMe] = useState<Profile | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [names, setNames] = useState<Record<string, Profile>>({});
+  const [walletTx, setWalletTx] = useState<WalletTx[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,12 +51,19 @@ export default function HistoryScreen() {
     }
     let active = true;
     (async () => {
-      const [p, os] = await Promise.all([fetchProfile(userId), fetchMyOrders(userId)]);
+      const [p, os, tx] = await Promise.all([
+        fetchProfile(userId),
+        fetchMyOrders(userId),
+        fetchWalletTransactions(userId),
+      ]);
       if (!active) return;
       setMe(p);
       setOrders(os);
+      setWalletTx(tx);
       // 撈出每筆訂單「對方」的名字（我是 client → 對方是 hunter，反之亦然）
-      const map = await fetchProfilesMap(os.map((o) => (o.client_id === userId ? o.hunter_id : o.client_id)));
+      const map = await fetchProfilesMap(
+        os.map((o) => (o.client_id === userId ? o.hunter_id : o.client_id)),
+      );
       if (active) {
         setNames(map);
         setLoading(false);
@@ -65,22 +74,15 @@ export default function HistoryScreen() {
     };
   }, [userId]);
 
-  // 錢包異動明細：唯一動到儲值金的事件是「撲空結算」。同一帳號可能在某單是 hunter
-  // （+車馬費）、在另一單是 client（+退款），故逐筆依各自角色分別產生條目。
-  const walletEntries = orders.flatMap((o) => {
-    if (o.status !== 'escaped') return [];
-    const out: { id: string; label: string; sub: string; amount: number; date: string }[] = [];
-    if (o.hunter_id === userId) {
-      out.push({ id: `${o.id}:fee`, label: '撲空車馬費入帳', sub: '目標逃逸・固定車馬費', amount: ESCAPE_FEE, date: o.created_at });
-    }
-    if (o.client_id === userId) {
-      const refund = Math.max((o.price ?? 0) - ESCAPE_FEE, 0);
-      if (refund > 0) {
-        out.push({ id: `${o.id}:refund`, label: '撲空退款入帳', sub: '目標逃逸・差額退回儲值金', amount: refund, date: o.created_at });
-      }
-    }
-    return out;
-  });
+  // 儲值金帳本：直接讀 wallet_transactions（DB 端結算時逐筆寫入），
+  // 逐筆對帳、不再由前端從訂單狀態推導 → 金流永遠與真實餘額一致。
+  const walletEntries = walletTx.map((t) => ({
+    id: t.id,
+    label: t.memo ?? WALLET_KIND_LABEL[t.kind] ?? '儲值金異動',
+    sub: WALLET_KIND_LABEL[t.kind] ?? '儲值金',
+    amount: t.amount,
+    date: t.created_at,
+  }));
 
   return (
     <SafeAreaView className="flex-1 bg-paper" edges={['top']}>
@@ -103,7 +105,11 @@ export default function HistoryScreen() {
           <Text className="mt-3 text-xs text-mute">載入歷史紀錄…</Text>
         </View>
       ) : (
-        <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          className="flex-1 px-5"
+          contentContainerStyle={{ paddingBottom: 24 }}
+          showsVerticalScrollIndicator={false}
+        >
           {/* 錢包餘額 */}
           <View className="mt-2 flex-row items-center rounded-3xl bg-ink p-4" style={shadowSoft}>
             <View className="h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
@@ -119,12 +125,19 @@ export default function HistoryScreen() {
           {/* 錢包異動明細 */}
           <Text className="mb-2 mt-6 text-base font-black text-ink">錢包異動明細</Text>
           {walletEntries.length === 0 ? (
-            <View className="rounded-2xl border border-wood-100 bg-white px-4 py-5" style={shadowSoft}>
+            <View
+              className="rounded-2xl border border-wood-100 bg-white px-4 py-5"
+              style={shadowSoft}
+            >
               <Text className="text-center text-xs text-mute">目前沒有任何儲值金異動</Text>
             </View>
           ) : (
             walletEntries.map((e) => (
-              <View key={e.id} className="mb-2.5 flex-row items-center rounded-2xl bg-white px-4 py-3" style={shadowSoft}>
+              <View
+                key={e.id}
+                className="mb-2.5 flex-row items-center rounded-2xl bg-white px-4 py-3"
+                style={shadowSoft}
+              >
                 <View className="h-10 w-10 items-center justify-center rounded-full bg-leaf/15">
                   <MaterialCommunityIcons name="cash-plus" size={20} color="#7FB069" />
                 </View>
@@ -154,25 +167,64 @@ export default function HistoryScreen() {
               const asHunter = o.hunter_id === userId;
               const meta = STATUS_META[o.status];
               const cpId = asHunter ? o.client_id : o.hunter_id;
-              const cpName = cpId ? names[cpId]?.display_name ?? '對方' : asHunter ? '求救者' : '尚未媒合';
+              const cpName = cpId
+                ? (names[cpId]?.display_name ?? '對方')
+                : asHunter
+                  ? '求救者'
+                  : '尚未媒合';
               const price = o.price ?? 0;
-              const earned = o.status === 'escaped' ? ESCAPE_FEE : o.status === 'cancelled' ? 0 : netEarning(price);
-              const spent = o.status === 'escaped' ? ESCAPE_FEE : o.status === 'cancelled' ? 0 : price;
+              // 中途取消（已媒合）：獵人賺到 $100 出勤補償、求救者付了 $100；
+              // 免費取消（媒合前）則雙方都是 $0。
+              const penaltyCancel =
+                o.status === 'cancelled' && o.cancel_reason === 'client_cancelled_matched';
+              const earned =
+                o.status === 'escaped'
+                  ? ESCAPE_FEE
+                  : penaltyCancel
+                    ? CANCEL_PENALTY
+                    : o.status === 'cancelled'
+                      ? 0
+                      : netEarning(price);
+              const spent =
+                o.status === 'escaped'
+                  ? ESCAPE_FEE
+                  : penaltyCancel
+                    ? CANCEL_PENALTY
+                    : o.status === 'cancelled'
+                      ? 0
+                      : price;
               const amountTag =
-                o.status === 'escaped' ? '車馬費' : o.status === 'cancelled' ? '已取消' : asHunter ? '淨收益' : '花費';
+                o.status === 'escaped'
+                  ? '車馬費'
+                  : penaltyCancel
+                    ? '出勤補償'
+                    : o.status === 'cancelled'
+                      ? '已取消'
+                      : asHunter
+                        ? '淨收益'
+                        : '花費';
               return (
                 <View key={o.id} className="mb-3 rounded-3xl bg-white p-4" style={shadowSoft}>
                   <View className="flex-row items-center justify-between">
                     <View className="flex-row items-center">
                       {/* 身分標籤：出動（獵人）/ 求救（求救者）*/}
-                      <View className={`rounded-full px-2 py-0.5 ${asHunter ? 'bg-leaf/15' : 'bg-sos/10'}`}>
-                        <Text className={`text-[11px] font-black ${asHunter ? 'text-leaf' : 'text-sos'}`}>
+                      <View
+                        className={`rounded-full px-2 py-0.5 ${asHunter ? 'bg-leaf/15' : 'bg-sos/10'}`}
+                      >
+                        <Text
+                          className={`text-[11px] font-black ${asHunter ? 'text-leaf' : 'text-sos'}`}
+                        >
                           {asHunter ? '出動' : '求救'}
                         </Text>
                       </View>
                       <Text className="ml-2 text-[11px] text-mute">{formatDate(o.created_at)}</Text>
                       {o.is_vip && (
-                        <MaterialCommunityIcons name="crown" size={13} color="#E6B422" style={{ marginLeft: 4 }} />
+                        <MaterialCommunityIcons
+                          name="crown"
+                          size={13}
+                          color="#E6B422"
+                          style={{ marginLeft: 4 }}
+                        />
                       )}
                     </View>
                     {/* 狀態徽章 */}
