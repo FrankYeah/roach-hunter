@@ -106,7 +106,16 @@ export async function createOrder(
     .select('id')
     .single();
   const orderId = (data?.id as string | undefined) ?? null;
-  if (error || !orderId) return { id: null, error: error?.message ?? null };
+  if (error || !orderId) {
+    // 濫用防護：同一 client 同時只能有一張 searching 單（唯一索引 orders_one_active_searching）
+    if (error?.code === '23505') {
+      return {
+        id: null,
+        error: '你已經有一張還在等待媒合的呼救了，請先取消或等媒合完成再發新的。',
+      };
+    }
+    return { id: null, error: error?.message ?? null };
+  }
   // 2) 敏感資料寫進 order_private（DB 級 RLS 把關，searching 階段只有本人讀得到）
   const { error: privErr } = await supabase.from('order_private').insert({
     order_id: orderId,

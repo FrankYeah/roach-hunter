@@ -1296,3 +1296,120 @@ drop policy if exists "read own dispute" on public.disputes;
 create policy "read own dispute"
   on public.disputes for select to authenticated
   using (raised_by = auth.uid());
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 第十九階段：營運自動化 + 濫用防護 + 資料保留（上線前加固）
+-- ═══════════════════════════════════════════════════════════════════
+-- 目標：讓訂單不會卡死、地址不會永久留存、同一人不會灌爆任務池。
+-- 三支維護工作寫成 SECURITY DEFINER 函式（可手動呼叫測試），再用 pg_cron 排程。
+-- 函式一律 revoke 掉 authenticated → 只有排程(postgres)與後台 service_role 能跑。
+
+-- ── (1) 逾時未確認自動結案：verifying 超過 24h → completed 並撥款 ────
+-- 保護獵人：求救者失聯不按確認，酬勞照樣入帳。金流與 confirm_completion 一致，
+-- 同一 hunter 若有多張同時到期，錢包/完成數以「加總 / 計數」一次更新（不漏算）。
+create or replace function public.job_auto_confirm_verifying()
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  with done as (
+    update public.orders set status = 'completed'
+     where status = 'verifying'
+       and matched_at is not null
+       and matched_at < now() - interval '24 hours'
+     returning id, hunter_id, coalesce(price, 0) as price
+  ),
+  agg as (
+    select hunter_id, sum(round(price * 0.85))::int as total, count(*) as cnt
+    from done where hunter_id is not null group by hunter_id
+  ),
+  pay as (
+    update public.profiles p
+       set wallet_balance = p.wallet_balance + a.total,
+           completed_tasks = p.completed_tasks + a.cnt
+      from agg a where p.id = a.hunter_id returning 1
+  )
+  insert into public.wallet_transactions (user_id, order_id, kind, amount, memo)
+  select hunter_id, id, 'task_payout', round(price * 0.85)::int, '任務完成酬勞（逾時自動確認）'
+  from done where hunter_id is not null and round(price * 0.85) > 0;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+-- ── (2) 無人接單自動過期：searching 超過 24h → cancelled（無金流，未媒合）──
+create or replace function public.job_expire_stale_searching()
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  update public.orders set status = 'cancelled', cancel_reason = 'auto_expired_unmatched'
+   where status = 'searching' and created_at < now() - interval '24 hours';
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+-- ── (3) 隱私保留策略：結案 30 天後清掉精確地址 / 進入指引 ────────────
+create or replace function public.job_purge_old_private()
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  update public.order_private op
+     set exact_address = null, entry_instructions = null
+    from public.orders o
+   where op.order_id = o.id
+     and o.status in ('completed', 'cancelled', 'escaped')
+     and o.created_at < now() - interval '30 days'
+     and (op.exact_address is not null or op.entry_instructions is not null);
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+revoke all on function public.job_auto_confirm_verifying() from public, authenticated;
+revoke all on function public.job_expire_stale_searching() from public, authenticated;
+revoke all on function public.job_purge_old_private() from public, authenticated;
+
+-- ── (4) 濫用防護：同一 client 同時只能有一張 searching 單 ─────────────
+-- 先把重複的舊 searching 單收斂成「只留最新一張」，其餘標記取消，才能建唯一索引。
+update public.orders o set status = 'cancelled', cancel_reason = 'dedup_multiple_searching'
+ where status = 'searching'
+   and exists (
+     select 1 from public.orders n
+     where n.client_id = o.client_id and n.status = 'searching' and n.created_at > o.created_at
+   );
+create unique index if not exists orders_one_active_searching
+  on public.orders (client_id) where status = 'searching';
+
+-- ── (5) pg_cron 啟用 + 排程（若專案未開 pg_cron，函式仍在、只是沒自動跑）──
+do $$
+begin
+  create extension if not exists pg_cron;
+exception when others then
+  raise notice 'pg_cron 自動啟用失敗（%）。到 Dashboard→Database→Extensions 手動啟用後重跑本檔即可。', sqlerrm;
+end $$;
+
+do $$
+begin
+  perform 1 from pg_extension where extname = 'pg_cron';
+  if found then
+    perform cron.schedule('auto-confirm-verifying', '*/30 * * * *',
+      'select public.job_auto_confirm_verifying();');
+    perform cron.schedule('expire-stale-searching', '15 * * * *',
+      'select public.job_expire_stale_searching();');
+    perform cron.schedule('purge-old-private', '30 3 * * *',
+      'select public.job_purge_old_private();');
+  else
+    raise notice 'pg_cron 未啟用：維護函式已建立但尚未排程，啟用擴充後重跑本檔即會自動排程。';
+  end if;
+end $$;
+
+-- ── (選用) 孤兒 matched 單自動回收：故意預設關閉 ─────────────────────
+-- 為什麼不預設開：45 分鐘就把 matched 打回任務池，會誤殺「合理進行中的長工單」，
+-- 造成同一張單被重複派給兩位獵人。獵人失聯的常見情況已由 report_no_show（20 分寬限、
+-- 求救者觸發）處理。若你要開「雙方都失聯」的長時保底，取消下面註解並自行調整時數：
+-- do $$ begin
+--   if exists (select 1 from pg_extension where extname='pg_cron') then
+--     perform cron.schedule('reclaim-orphan-matched','*/30 * * * *', $c$
+--       update public.orders set status='searching', hunter_id=null,
+--              hunter_lat=null, hunter_lng=null, matched_at=null
+--        where status='matched' and matched_at < now() - interval '3 hours';
+--     $c$);
+--   end if;
+-- end $$;
