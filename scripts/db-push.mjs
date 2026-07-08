@@ -54,8 +54,8 @@ async function main() {
     ssl: { rejectUnauthorized: false }, // Supabase 一律走 SSL
   });
 
-  await client.connect();
   try {
+    await client.connect();
     // 整份包在單一交易：任一句失敗就整體 rollback，資料庫不會停在半套狀態。
     await client.query('begin');
     await client.query(sql);
@@ -63,11 +63,21 @@ async function main() {
     console.log('✓ 套用成功（單一交易，已 commit）。');
   } catch (e) {
     await client.query('rollback').catch(() => {});
-    console.error('\n✗ 套用失敗，已整體 rollback。錯誤：\n  ' + (e?.message ?? e));
+    const msg = e?.message ?? String(e);
+    console.error('\n✗ 套用失敗：' + msg);
+    if (/ENOTFOUND|ENETUNREACH|ETIMEDOUT/.test(e?.code || msg)) {
+      console.error(
+        '  連不到主機。新版 Supabase 的「直連 db.<ref>.supabase.co」多為 IPv6-only，\n' +
+          '  家用網路常無法解析 → 請改用 Session pooler 連線字串：\n' +
+          '  host 形如 aws-0-<region>.pooler.supabase.com、使用者形如 postgres.<ref>、port 5432。',
+      );
+    } else {
+      console.error('  已整體 rollback，資料庫維持原狀。');
+    }
     if (e?.position) console.error('  （position: ' + e.position + '）');
     process.exitCode = 1;
   } finally {
-    await client.end();
+    await client.end().catch(() => {});
   }
 }
 
