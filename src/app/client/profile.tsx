@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { clientLevelFromRequested, isVvip } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
+import { deleteAccount } from '@/lib/account';
 import { signOut } from '@/lib/auth';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
 import { fetchClientCompletedCount } from '@/lib/orders';
@@ -29,6 +30,7 @@ export default function ClientProfileScreen() {
   const [location, setLocation] = useState('');
   const [gender, setGender] = useState<Gender>('unspecified');
   const [requestedCount, setRequestedCount] = useState(0);
+  const [deleting, setDeleting] = useState(false);
 
   // 回填現有的個人資料（名稱 / 地址基底 / 性別）+ 累積完成數（推導稱號）
   useEffect(() => {
@@ -55,6 +57,35 @@ export default function ClientProfileScreen() {
     selectHaptic();
     setGender(g);
     updateProfile(userId, { gender: g }); // 即時寫回
+  };
+
+  // 永久刪除帳號：二次確認 → Edge Function 刪除 → 自動登出回登入頁。
+  // 有進行中的單會被擋下，提示先完成或取消。
+  const onDeleteAccount = () => {
+    if (deleting) return;
+    Alert.alert(
+      '永久刪除帳號？',
+      '這會刪除你的個人資料、錢包紀錄與認證檔案，且無法復原。進行中的訂單需先完成或取消。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '永久刪除',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            const { ok, reason } = await deleteAccount();
+            setDeleting(false);
+            if (ok) return; // signOut 後 auth gate 會自動導回登入頁
+            Alert.alert(
+              '無法刪除',
+              reason === 'active_orders'
+                ? '你還有進行中的訂單，請先完成或取消後再刪除帳號。'
+                : '目前無法刪除帳號，請稍後再試。',
+            );
+          },
+        },
+      ],
+    );
   };
 
   const save = () => {
@@ -86,7 +117,11 @@ export default function ClientProfileScreen() {
         <Text className="ml-3 text-xl font-black text-ink">個人設定</Text>
       </View>
 
-      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        className="flex-1 px-5"
+        contentContainerStyle={{ paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* 個人卡 */}
         <View className="mt-2 flex-row items-center rounded-3xl bg-white p-4" style={shadowSoft}>
           <View className="h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-wood-300">
@@ -100,24 +135,36 @@ export default function ClientProfileScreen() {
             <Text className="text-lg font-black text-ink">{profile?.display_name ?? '求救者'}</Text>
             <View className="mt-1 flex-row items-center">
               <Ionicons name="star" size={13} color="#F5A623" />
-              <Text className="ml-1 text-xs font-bold text-ink">{(profile?.rating ?? 5).toFixed(1)}</Text>
+              <Text className="ml-1 text-xs font-bold text-ink">
+                {(profile?.rating ?? 5).toFixed(1)}
+              </Text>
               <Text className="ml-2 text-xs text-mute">求救者・累積 {requestedCount} 次</Text>
             </View>
           </View>
           {/* 動態稱號徽章 */}
           <View className={`flex-row items-center rounded-full px-2.5 py-1 ${clientLevel.badge}`}>
-            <MaterialCommunityIcons name={clientLevel.icon as never} size={13} color={vvip ? '#FFFFFF' : '#9A763C'} />
-            <Text className={`ml-1 text-[11px] font-bold ${clientLevel.text}`}>{clientLevel.name}</Text>
+            <MaterialCommunityIcons
+              name={clientLevel.icon as never}
+              size={13}
+              color={vvip ? '#FFFFFF' : '#9A763C'}
+            />
+            <Text className={`ml-1 text-[11px] font-bold ${clientLevel.text}`}>
+              {clientLevel.name}
+            </Text>
           </View>
         </View>
 
         {/* VVIP 特權說明 */}
         {vvip && (
-          <View className="mt-3 flex-row items-start rounded-2xl bg-ink px-4 py-3" style={shadowSoft}>
+          <View
+            className="mt-3 flex-row items-start rounded-2xl bg-ink px-4 py-3"
+            style={shadowSoft}
+          >
             <MaterialCommunityIcons name="crown" size={18} color="#E6B422" />
             <Text className="ml-2 flex-1 text-xs leading-5 text-silver">
               <Text className="font-black text-white">VVIP 領域展開・</Text>
-              你發出的呼救會標記為 <Text className="font-bold text-white">金色急件</Text>，在獵人任務池無視新手延遲、優先置頂，秒被搶接。
+              你發出的呼救會標記為 <Text className="font-bold text-white">金色急件</Text>
+              ，在獵人任務池無視新手延遲、優先置頂，秒被搶接。
             </Text>
           </View>
         )}
@@ -157,7 +204,10 @@ export default function ClientProfileScreen() {
           <MaterialCommunityIcons name="account-outline" size={18} color="#2A2521" />
           <Text className="ml-2 text-base font-black text-ink">顯示名稱</Text>
         </View>
-        <View className="rounded-2xl border-2 border-wood-100 bg-white px-4 py-3" style={shadowSoft}>
+        <View
+          className="rounded-2xl border-2 border-wood-100 bg-white px-4 py-3"
+          style={shadowSoft}
+        >
           <TextInput
             value={name}
             onChangeText={setName}
@@ -174,7 +224,10 @@ export default function ClientProfileScreen() {
           <MaterialCommunityIcons name="map-marker-outline" size={18} color="#2A2521" />
           <Text className="ml-2 text-base font-black text-ink">地址基底</Text>
         </View>
-        <View className="rounded-2xl border-2 border-wood-100 bg-white px-4 py-3" style={shadowSoft}>
+        <View
+          className="rounded-2xl border-2 border-wood-100 bg-white px-4 py-3"
+          style={shadowSoft}
+        >
           <Text className="mb-1 text-[11px] text-mute">
             模糊地址（如「夏日公寓」/「安樂區安一路」），發單時自動帶入當底稿
           </Text>
@@ -217,7 +270,9 @@ export default function ClientProfileScreen() {
                   }`}
                 >
                   <Ionicons name={g.icon} size={14} color={on ? '#FB6B4B' : '#9A8F80'} />
-                  <Text className={`ml-1.5 text-xs font-bold ${on ? 'text-sos' : 'text-ink'}`}>{g.label}</Text>
+                  <Text className={`ml-1.5 text-xs font-bold ${on ? 'text-sos' : 'text-ink'}`}>
+                    {g.label}
+                  </Text>
                 </View>
               </Pressable>
             );
@@ -246,10 +301,27 @@ export default function ClientProfileScreen() {
           className="mt-3"
           style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
         >
-          <View className="flex-row items-center justify-center rounded-2xl border border-wood-200 bg-white py-3.5" style={shadowSoft}>
+          <View
+            className="flex-row items-center justify-center rounded-2xl border border-wood-200 bg-white py-3.5"
+            style={shadowSoft}
+          >
             <Ionicons name="log-out-outline" size={18} color="#E2553A" />
             <Text className="ml-2 text-sm font-bold text-sos">登出</Text>
           </View>
+        </Pressable>
+
+        {/* 刪除帳號（App Store 硬性規定的 App 內刪除入口）*/}
+        <Pressable
+          onPress={onDeleteAccount}
+          disabled={deleting}
+          accessibilityRole="button"
+          accessibilityLabel="永久刪除帳號"
+          hitSlop={6}
+          className="mb-2 mt-5 items-center"
+        >
+          <Text className="text-xs font-semibold text-mute underline">
+            {deleting ? '刪除中…' : '永久刪除帳號'}
+          </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

@@ -4,3 +4,7 @@ project_id = "roach-hunter"
 # notify：推播發送。verify_jwt = true → 未帶有效登入 JWT 的請求在平台層就被擋下
 [functions.notify]
 verify_jwt = true
+
+# delete-account：App 內刪除帳號（App Store 硬性規定）。verify_jwt 擋未登入請求
+[functions.delete-account]
+verify_jwt = true
