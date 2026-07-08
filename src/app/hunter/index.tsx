@@ -22,6 +22,7 @@ import {
 } from '@/lib/orders';
 import { ensureProfile, fetchProfile, setOnlineStatus, type Profile } from '@/lib/profiles';
 import { notifyOrderAccepted, updatePushLocation } from '@/lib/push';
+import { fetchBlockedUserIds } from '@/lib/safety';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore, type LatLng } from '@/store/useAppStore';
 
@@ -204,6 +205,9 @@ export default function HunterPoolScreen() {
   // 上線接單開關的樂觀覆寫值（null = 以 DB 撈回的 myProfile.is_online 為準）
   const [onlineOverride, setOnlineOverride] = useState<boolean | null>(null);
 
+  // 封鎖關係集合（雙向）：任一方封鎖 → 該對方的單不進我的任務池
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(() => new Set());
+
   useFocusEffect(
     useCallback(() => {
       if (!configured || !userId) return;
@@ -213,6 +217,7 @@ export default function HunterPoolScreen() {
         setMyProfile(p);
         setOnlineOverride(null); // 伺服器狀態到手 → 樂觀覆寫退場，以 DB 為準
       });
+      fetchBlockedUserIds(userId).then((s) => active && setBlockedIds(s));
       return () => {
         active = false;
       };
@@ -268,6 +273,7 @@ export default function HunterPoolScreen() {
   const eligible = useMemo(
     () =>
       orders.filter((o) => {
+        if (o.client_id && blockedIds.has(o.client_id)) return false; // 封鎖關係，不媒合
         if ((o.min_completed ?? 0) > myCompleted) return false; // 等級不足
         const pref = o.gender_pref ?? 'any';
         if (pref !== 'any' && pref !== myGender) return false; // 性別不符
@@ -279,7 +285,7 @@ export default function HunterPoolScreen() {
         if (d != null && d > searchRadiusKm * 1000) return false;
         return true;
       }),
-    [orders, myCompleted, myGender, userLocation, searchRadiusKm],
+    [orders, myCompleted, myGender, userLocation, searchRadiusKm, blockedIds],
   );
 
   // ── 優先派單：未完整認證者，未指定等級的單延遲 3 秒才顯示 ──

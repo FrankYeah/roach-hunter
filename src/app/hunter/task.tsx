@@ -7,6 +7,7 @@ import { Alert, AppState, Image, Pressable, ScrollView, Text, View } from 'react
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatBox } from '@/components/chat-box';
+import { ReportBlockButton } from '@/components/report-block';
 import { ESCAPE_FEE, TARGET_TIERS } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { SOS_TASKS, netEarning, tierOf } from '@/data/tasks';
@@ -289,6 +290,14 @@ export default function HunterTaskScreen() {
             <Text className="text-[11px] text-mute">目標</Text>
             <Text className="text-sm font-black text-ink">{tier.hint}</Text>
           </View>
+          {acceptedOrder?.client_id && (
+            <ReportBlockButton
+              selfId={userId}
+              targetId={acceptedOrder.client_id}
+              targetName={clientName}
+              orderId={acceptedOrder.id}
+            />
+          )}
         </View>
 
         {/* 接單後解鎖：精確地址 + 進入指引 */}

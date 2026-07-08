@@ -1212,3 +1212,87 @@ begin
 end;
 $$;
 grant execute on function public.confirm_completion(uuid) to authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 第十八階段：信任與安全（檢舉 / 封鎖 / 爭議申訴）
+-- ═══════════════════════════════════════════════════════════════════
+-- O2O 陌生人上門服務的信任底線：能檢舉、能封鎖對方避免再媒合、能對有問題的
+-- 訂單申訴讓客服介入。三張表都只開「本人相關」的最小 RLS，稽核與裁決在後台
+-- 用 service_role 進行。
+
+-- ── (1) 檢舉：寫給後台審核，一般人只讀得到自己送出的 ──────────────────
+create table if not exists public.user_reports (
+  id          uuid primary key default gen_random_uuid(),
+  reporter_id uuid not null references public.profiles(id) on delete cascade,
+  reported_id uuid not null references public.profiles(id) on delete cascade,
+  order_id    uuid references public.orders(id) on delete set null,
+  reason      text,
+  status      text not null default 'open'
+                check (status in ('open', 'reviewing', 'resolved', 'dismissed')),
+  created_at  timestamptz not null default now()
+);
+create index if not exists user_reports_status_idx on public.user_reports (status, created_at desc);
+alter table public.user_reports enable row level security;
+
+drop policy if exists "insert own report" on public.user_reports;
+create policy "insert own report"
+  on public.user_reports for insert to authenticated
+  with check (reporter_id = auth.uid() and reported_id <> auth.uid());
+
+drop policy if exists "read own report" on public.user_reports;
+create policy "read own report"
+  on public.user_reports for select to authenticated
+  using (reporter_id = auth.uid());
+
+-- ── (2) 封鎖：雙向影響媒合（任一方封鎖，獵人就看不到對方的單）────────────
+create table if not exists public.blocks (
+  blocker_id uuid not null references public.profiles(id) on delete cascade,
+  blocked_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id)
+);
+alter table public.blocks enable row level security;
+
+-- 讀：與我相關的兩個方向都要看得到，App 端才能做「雙向過濾」
+drop policy if exists "read blocks involving me" on public.blocks;
+create policy "read blocks involving me"
+  on public.blocks for select to authenticated
+  using (blocker_id = auth.uid() or blocked_id = auth.uid());
+
+-- 寫 / 刪：只能操作自己發起的封鎖，且不能封鎖自己
+drop policy if exists "write own blocks" on public.blocks;
+create policy "write own blocks"
+  on public.blocks for all to authenticated
+  using (blocker_id = auth.uid())
+  with check (blocker_id = auth.uid() and blocked_id <> auth.uid());
+
+-- ── (3) 爭議申訴：訂單當事人對自己參與的單提出，款項先保留待客服裁決 ─────
+create table if not exists public.disputes (
+  id         uuid primary key default gen_random_uuid(),
+  order_id   uuid not null references public.orders(id) on delete cascade,
+  raised_by  uuid not null references public.profiles(id) on delete cascade,
+  reason     text,
+  status     text not null default 'open'
+               check (status in ('open', 'reviewing', 'resolved', 'dismissed')),
+  created_at timestamptz not null default now()
+);
+create index if not exists disputes_status_idx on public.disputes (status, created_at desc);
+create index if not exists disputes_order_idx on public.disputes (order_id);
+alter table public.disputes enable row level security;
+
+drop policy if exists "party raises dispute" on public.disputes;
+create policy "party raises dispute"
+  on public.disputes for insert to authenticated
+  with check (
+    raised_by = auth.uid()
+    and exists (
+      select 1 from public.orders o
+      where o.id = order_id
+        and (o.client_id = auth.uid() or o.hunter_id = auth.uid())
+    )
+  );
+
+drop policy if exists "read own dispute" on public.disputes;
+create policy "read own dispute"
+  on public.disputes for select to authenticated
+  using (raised_by = auth.uid());

@@ -152,6 +152,15 @@ Next.js Server ──(service_role key, 繞過 RLS)──► Postgres / Storage 
 - 未來後台若要做「平台公告推播」，在 server 端讀這張表打 `https://exp.host/--/api/v2/push/send`。
 - App 端事件推播（新單廣播/獵人出發/新訊息）由 Supabase Edge Function `notify` 負責，後台不用管。
 
+### `user_reports` / `blocks` / `disputes` — 信任與安全（後台審核 / 裁決）
+- `user_reports`：`id, reporter_id, reported_id, order_id, reason, status(open|reviewing|resolved|dismissed), created_at`。
+  檢舉佇列篩 `status='open'`；查被檢舉者的歷史單、對話、KYC 後決定停權（設 `profiles.suspended_until`）或警告。
+- `blocks`：`blocker_id, blocked_id, created_at`（PK 兩欄）。使用者自助封鎖，任一方封鎖 App 端就不再互相媒合。
+  後台唯讀即可（分析用；例如某獵人被大量封鎖 = 警訊）。
+- `disputes`：`id, order_id, raised_by, reason, status(open|reviewing|resolved|dismissed), created_at`。
+  申訴佇列篩 `status='open'`；客服裁決後用 service_role **直接改 orders.status**（強制 completed 撥款 or cancelled 退款）
+  並補寫 `wallet_transactions`（kind='adjustment'），最後把 dispute 標 `resolved`。
+
 ### Storage bucket `verifications`（私有）— KYC 證件照
 - 路徑慣例：`{userId}/id.jpg`（身分證件）、`{userId}/police.jpg`（良民證）。
 - bucket 是**私有**的，後台要看必須用 **`createSignedUrl` 產生短期連結**，不可做成公開 URL。
@@ -176,7 +185,7 @@ Next.js Server ──(service_role key, 繞過 RLS)──► Postgres / Storage 
 
 ---
 
-## 6. 後台功能（建議 6 個畫面）
+## 6. 後台功能（建議 7 個畫面）
 
 1. **登入頁** — Supabase Auth email/password + 白名單把關。
 2. **Dashboard 總覽** — 各狀態單數、今日新單、完成單 GMV（sum price where completed）、
@@ -188,7 +197,11 @@ Next.js Server ──(service_role key, 繞過 RLS)──► Postgres / Storage 
    可解除停權（`suspended_until` 清成 null、視情況歸零 `no_show_count`）。
 5. **KYC 審核佇列** — 篩 `id_verification_status='pending'` 或 `police_verification_status='pending'`；
    用 signed URL 顯示證件照 → 「通過」設 `verified`、「退件」設 `rejected`。
-6. **（選用）操作稽核** — 見下方 SQL，記錄管理員所有動作。
+6. **爭議 / 檢舉佇列** — `disputes` 與 `user_reports` 篩 `status='open'`；
+   - 申訴詳情：看該單金流、對話、雙方資料 → 裁決「判給獵人」(強制 completed 撥款) 或「退款求救者」(強制 cancelled 退款)，
+     直接改 `orders.status` + 補一列 `wallet_transactions(kind='adjustment')`，再把 dispute 標 `resolved`。
+   - 檢舉詳情：看被檢舉者歷史 → 停權（設 `suspended_until`）或標 `dismissed`。
+7. **（選用）操作稽核** — 見下方 SQL，記錄管理員所有動作。
 
 ### 6.1（選用）操作稽核表 — 想留軌跡再在 Supabase SQL Editor 跑
 ```sql
@@ -248,6 +261,11 @@ push_tokens: user_id uuid(pk), token text, lat/lng float8, updated_at timestampt
   # Expo push token，機密：介面只顯示有/無，永遠不要把 token 印在畫面上
 wallet_transactions: id, user_id uuid, order_id uuid, kind text, amount int, memo text, created_at
   # 儲值金帳本；sum(amount) 應 = profiles.wallet_balance。後台手動改錢包要補一列 kind='adjustment'
+user_reports: id, reporter_id uuid, reported_id uuid, order_id uuid, reason text,
+  status text(open|reviewing|resolved|dismissed), created_at   # 檢舉佇列
+blocks: blocker_id uuid, blocked_id uuid, created_at (PK 兩欄)  # 使用者自助封鎖，後台唯讀
+disputes: id, order_id uuid, raised_by uuid, reason text,
+  status text(open|reviewing|resolved|dismissed), created_at   # 申訴佇列；裁決後直接改 orders + 補 wallet_transactions
 Storage bucket 'verifications'（私有）：KYC 證件照，路徑 {userId}/id.jpg、{userId}/police.jpg
 client_id / hunter_id / sender_id 都對應 auth.users.id；
 要顯示 email/名字時用 supabase.auth.admin.listUsers() 或 join profiles.display_name。
@@ -268,7 +286,10 @@ client_id / hunter_id / sender_id 都對應 auth.users.id；
    可解除停權（suspended_until 清 null、視情況歸零 no_show_count）。
 5. KYC 審核佇列：篩 id_verification_status='pending' 或 police_verification_status='pending'，
    用 storage createSignedUrl 顯示證件照，按鈕「通過」→ 設 verified、「退件」→ rejected。
-6. （選用）admin_actions 稽核表記錄所有後台操作。
+6. 爭議/檢舉佇列：disputes 與 user_reports 篩 status='open'。
+   申訴裁決 → 直接改 orders.status（強制 completed 撥款 / cancelled 退款）+ 補 wallet_transactions(kind='adjustment')，
+   dispute 標 resolved。檢舉 → 看歷史後停權（設 suspended_until）或 dismissed。
+7. （選用）admin_actions 稽核表記錄所有後台操作。
 
 ## 約束
 - 後台直接用 service role 做 update（不要呼叫 App 的 settle_escaped / submit_rating，那些綁 auth.uid()）。

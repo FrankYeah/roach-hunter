@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatBox } from '@/components/chat-box';
 import { LevelBadge } from '@/components/level-badge';
+import { ReportBlockButton } from '@/components/report-block';
 import { CANCEL_PENALTY, ESCAPE_FEE, levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
@@ -23,6 +24,7 @@ import {
 } from '@/lib/orders';
 import { fetchProfile, type Profile } from '@/lib/profiles';
 import { notifyOrderCompleted } from '@/lib/push';
+import { raiseDispute } from '@/lib/safety';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -129,6 +131,35 @@ export default function StatusScreen() {
     successHaptic();
     notifyOrderCompleted(orderId); // 推播告知獵人酬勞入帳（fire-and-forget）
     goReview();
+  };
+
+  // 爭議申訴：獵人回報已解決但現場其實有問題 → 交客服裁決，款項先保留（不撥款）。
+  const [disputing, setDisputing] = useState(false);
+  const onRaiseDispute = () => {
+    if (!orderId || disputing) return;
+    Alert.alert(
+      '回報這筆訂單有問題？',
+      '客服會介入協助處理，這筆款項會先保留、不會撥給獵人。確定要送出嗎？',
+      [
+        { text: '再想想', style: 'cancel' },
+        {
+          text: '送出給客服',
+          style: 'destructive',
+          onPress: async () => {
+            setDisputing(true);
+            const { ok } = await raiseDispute(orderId, 'raised_from_verifying');
+            setDisputing(false);
+            setVerifyDismissed(true);
+            Alert.alert(
+              ok ? '已送出，客服將介入' : '送出失敗',
+              ok
+                ? '我們已收到你的回報，款項會先保留，客服會盡快聯繫協助。'
+                : '目前無法送出，請稍後再試。',
+            );
+          },
+        },
+      ],
+    );
   };
 
   // ── 中途取消（獵人已出發）：收 $100 出勤補償金，其餘退儲值金 ──
@@ -335,6 +366,14 @@ export default function StatusScreen() {
               已出動 {completed} 次・{blurb}
             </Text>
           </View>
+          {configured && matchedHunterId && (
+            <ReportBlockButton
+              selfId={userId}
+              targetId={matchedHunterId}
+              targetName={name}
+              orderId={orderId}
+            />
+          )}
         </View>
 
         {/* 獵人逾時未到 → 回報重新媒合（真實模式、matched 期間才顯示） */}
@@ -379,6 +418,22 @@ export default function StatusScreen() {
           >
             <Ionicons name="shield-checkmark" size={16} color="#7FB069" />
             <Text className="ml-2 text-sm font-bold text-leaf">獵人回報已解決 → 點我確認結案</Text>
+          </Pressable>
+        )}
+
+        {/* 爭議申訴：verifying 期間，現場其實有問題時交客服（款項先保留）*/}
+        {configured && orderStatusDb === 'verifying' && (
+          <Pressable
+            onPress={onRaiseDispute}
+            disabled={disputing}
+            accessibilityRole="button"
+            accessibilityLabel="回報這筆訂單有問題，交由客服處理"
+            hitSlop={8}
+            className="mt-2 items-center"
+          >
+            <Text className="text-xs font-semibold text-mute underline">
+              {disputing ? '送出中…' : '現場有問題？回報客服協助處理'}
+            </Text>
           </Pressable>
         )}
 
