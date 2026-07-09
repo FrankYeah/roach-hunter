@@ -1,5 +1,6 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -7,12 +8,17 @@ import { MosaicTarget } from '@/components/mosaic-target';
 import { shadowSoft } from '@/constants/shadows';
 import { NEARBY_HUNTERS } from '@/data/hunters';
 import { successHaptic } from '@/lib/haptics';
-import { cancelOrder, subscribeOrder } from '@/lib/orders';
+import { bumpOrderPrice, cancelOrder, subscribeOrder } from '@/lib/orders';
+import { notifyNewOrder } from '@/lib/push';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 
 const RADAR = 280;
 const MATCH_DELAY_MS = 3000;
+/** 等這麼久還沒人接，就跳出「加價重發」補救卡 */
+const WAIT_HINT_MS = 30000;
+/** 每次加價的幅度（提高賞金吸引力）*/
+const BUMP_STEP = 30;
 
 /** 由中心向外擴散的脈衝圈 */
 function PulseRing({ delay }: { delay: number }) {
@@ -98,6 +104,32 @@ export default function MatchingScreen() {
     router.replace('/');
   };
 
+  // ── 無人接單補救：等 WAIT_HINT_MS 沒媒合 → 跳出「加價重發」卡 ──
+  // round 每加價一次 +1 → 重新計時（隱藏卡片、再等一輪）。
+  const [round, setRound] = useState(0);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [bumping, setBumping] = useState(false);
+  const [bumpedTo, setBumpedTo] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orderId) return;
+    setShowRecovery(false);
+    const t = setTimeout(() => setShowRecovery(true), WAIT_HINT_MS);
+    return () => clearTimeout(t);
+  }, [orderId, round]);
+
+  const rebroadcast = async () => {
+    if (!orderId || bumping) return;
+    setBumping(true);
+    const { price } = await bumpOrderPrice(orderId, BUMP_STEP);
+    setBumping(false);
+    if (price == null) return; // 已被接走 / 已取消 → 訂閱會處理跳轉，不打擾
+    setBumpedTo(price);
+    notifyNewOrder(orderId); // 用新賞金重新廣播給線上獵人
+    successHaptic();
+    setRound((r) => r + 1); // 重新計時
+  };
+
   return (
     <SafeAreaView className="flex-1 items-center justify-between bg-paper py-8">
       <View className="items-center pt-8">
@@ -108,7 +140,10 @@ export default function MatchingScreen() {
       {/* 雷達 */}
       <View style={{ width: RADAR, height: RADAR }} className="items-center justify-center">
         {/* 靜態同心圓 */}
-        <View className="absolute rounded-full border border-wood-200" style={{ width: RADAR, height: RADAR }} />
+        <View
+          className="absolute rounded-full border border-wood-200"
+          style={{ width: RADAR, height: RADAR }}
+        />
         <View
           className="absolute rounded-full border border-wood-200"
           style={{ width: RADAR * 0.66, height: RADAR * 0.66 }}
@@ -128,7 +163,14 @@ export default function MatchingScreen() {
           style={{ position: 'absolute', width: RADAR, height: RADAR, transform: [{ rotate }] }}
         >
           <View
-            style={{ position: 'absolute', left: RADAR / 2 - 1, top: 0, width: 2, height: RADAR / 2, backgroundColor: '#FB6B4B' }}
+            style={{
+              position: 'absolute',
+              left: RADAR / 2 - 1,
+              top: 0,
+              width: 2,
+              height: RADAR / 2,
+              backgroundColor: '#FB6B4B',
+            }}
           />
           <View
             className="rounded-full bg-sos"
@@ -143,8 +185,45 @@ export default function MatchingScreen() {
       </View>
 
       <View className="w-full items-center px-8">
+        {/* 無人接單補救卡：加價重發 */}
+        {showRecovery && (
+          <View className="mb-4 w-full rounded-3xl bg-white p-4" style={shadowSoft}>
+            <View className="flex-row items-center">
+              <Ionicons name="trending-up" size={18} color="#FB6B4B" />
+              <Text className="ml-2 flex-1 text-sm font-black text-ink">還沒有獵人接單？</Text>
+            </View>
+            <Text className="mt-1.5 text-xs leading-5 text-mute">
+              加 ${BUMP_STEP} 賞金能明顯提高吸引力，並立即重新廣播給附近上線的獵人。
+              {bumpedTo != null && (
+                <Text className="font-bold text-sos">　目前賞金 ${bumpedTo}</Text>
+              )}
+            </Text>
+            <Pressable
+              onPress={rebroadcast}
+              disabled={bumping}
+              accessibilityRole="button"
+              accessibilityLabel={`加價 ${BUMP_STEP} 元並重新廣播`}
+              className="mt-3"
+              style={({ pressed }) => [
+                { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: bumping ? 0.6 : 1 },
+              ]}
+            >
+              <View className="items-center rounded-2xl bg-sos py-3">
+                <Text className="text-sm font-black text-white">
+                  {bumping ? '重新廣播中…' : `加價 $${BUMP_STEP}・重新廣播`}
+                </Text>
+              </View>
+            </Pressable>
+          </View>
+        )}
+
         <Text className="mb-4 text-xs text-mute">通常 10 秒內就會有人接單 🛵</Text>
-        <Pressable onPress={cancel} accessibilityRole="button" accessibilityLabel="取消呼救" hitSlop={12}>
+        <Pressable
+          onPress={cancel}
+          accessibilityRole="button"
+          accessibilityLabel="取消呼救"
+          hitSlop={12}
+        >
           <Text className="text-sm font-semibold text-mute underline">取消呼救</Text>
         </Pressable>
       </View>

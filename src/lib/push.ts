@@ -81,11 +81,12 @@ export function usePushNotifications(userId: string | null): void {
       if (!active || !token) return;
       client
         .from('push_tokens')
-        .upsert({
-          user_id: userId,
-          token,
-          updated_at: new Date().toISOString(),
-        })
+        // 多裝置：主鍵是 token，衝突以 token 為準（同一裝置重登會更新 user_id/時間，
+        // 換帳號登入同一台機也能把 token 轉綁到新 user）。
+        .upsert(
+          { user_id: userId, token, updated_at: new Date().toISOString() },
+          { onConflict: 'token' },
+        )
         .then(() => {});
     });
     return () => {

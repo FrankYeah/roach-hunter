@@ -95,6 +95,12 @@ async function sendPushes(admin: SupabaseClient, pushes: PushMessage[]): Promise
   return sent;
 }
 
+/** 某使用者的所有裝置 token（多裝置：一人可多列）*/
+async function tokensFor(admin: SupabaseClient, userId: string): Promise<string[]> {
+  const { data } = await admin.from('push_tokens').select('token').eq('user_id', userId);
+  return ((data ?? []) as { token: string }[]).map((r) => r.token);
+}
+
 Deno.serve(async (req) => {
   try {
     const admin = createClient(
@@ -177,22 +183,17 @@ Deno.serve(async (req) => {
       if (order.hunter_id !== uid || order.status !== 'matched' || !order.client_id) {
         return json({ error: 'forbidden' }, 403);
       }
-      const { data: t } = await admin
-        .from('push_tokens')
-        .select('token')
-        .eq('user_id', order.client_id)
-        .maybeSingle();
-      if (t?.token) {
-        const known =
-          hasCoords(order.hunter_lat, order.hunter_lng) &&
-          hasCoords(order.location_lat, order.location_lng);
-        const body = known
-          ? `您的獵人已出發，預計 ${etaMin(
-              distanceMeters(order.hunter_lat, order.hunter_lng, order.location_lat, order.location_lng),
-            )} 分鐘後抵達！`
-          : '您的獵人已出發，正在趕來的路上！';
+      const known =
+        hasCoords(order.hunter_lat, order.hunter_lng) &&
+        hasCoords(order.location_lat, order.location_lng);
+      const body = known
+        ? `您的獵人已出發，預計 ${etaMin(
+            distanceMeters(order.hunter_lat, order.hunter_lng, order.location_lat, order.location_lng),
+          )} 分鐘後抵達！`
+        : '您的獵人已出發，正在趕來的路上！';
+      for (const to of await tokensFor(admin, order.client_id)) {
         pushes.push({
-          to: t.token,
+          to,
           title: '🥾 獵人接單了！',
           body,
           sound: 'default',
@@ -206,14 +207,9 @@ Deno.serve(async (req) => {
       if (order.hunter_id !== uid || order.status !== 'verifying' || !order.client_id) {
         return json({ error: 'forbidden' }, 403);
       }
-      const { data: t } = await admin
-        .from('push_tokens')
-        .select('token')
-        .eq('user_id', order.client_id)
-        .maybeSingle();
-      if (t?.token) {
+      for (const to of await tokensFor(admin, order.client_id)) {
         pushes.push({
-          to: t.token,
+          to,
           title: '✅ 獵人回報已消滅目標！',
           body: '請確認現場狀況，按下「確認完成」後才會結案撥款。',
           sound: 'default',
@@ -227,15 +223,10 @@ Deno.serve(async (req) => {
       if (order.client_id !== uid || order.status !== 'completed' || !order.hunter_id) {
         return json({ error: 'forbidden' }, 403);
       }
-      const { data: t } = await admin
-        .from('push_tokens')
-        .select('token')
-        .eq('user_id', order.hunter_id)
-        .maybeSingle();
-      if (t?.token) {
-        const net = Math.round((order.price ?? 0) * (1 - FEE_RATE));
+      const net = Math.round((order.price ?? 0) * (1 - FEE_RATE));
+      for (const to of await tokensFor(admin, order.hunter_id)) {
         pushes.push({
-          to: t.token,
+          to,
           title: '🎉 任務完成，酬勞入帳！',
           body: `求救者已確認完成，$${net} 已存入你的錢包。`,
           sound: 'default',
@@ -252,14 +243,14 @@ Deno.serve(async (req) => {
       }
       const recipient = uid === order.client_id ? order.hunter_id : order.client_id;
       if (recipient) {
-        const [{ data: t }, { data: sender }] = await Promise.all([
-          admin.from('push_tokens').select('token').eq('user_id', recipient).maybeSingle(),
+        const [toks, { data: sender }] = await Promise.all([
+          tokensFor(admin, recipient),
           admin.from('profiles').select('display_name').eq('id', uid).maybeSingle(),
         ]);
-        if (t?.token) {
-          const preview = (payload.preview ?? '').trim().slice(0, 60) || '傳來一則新訊息';
+        const preview = (payload.preview ?? '').trim().slice(0, 60) || '傳來一則新訊息';
+        for (const to of toks) {
           pushes.push({
-            to: t.token,
+            to,
             title: sender?.display_name ?? '新訊息',
             body: preview,
             sound: 'default',

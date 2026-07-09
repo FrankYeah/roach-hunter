@@ -147,7 +147,8 @@ Next.js Server ──(service_role key, 繞過 RLS)──► Postgres / Storage 
 - 客服對帳、退款爭議都查這張表。
 
 ### `push_tokens` — 推播權杖（敏感，後台不要顯示 token 本身）
-`user_id(pk), token, lat, lng, updated_at`。Expo push token + 使用者最後已知位置。
+`token(pk), user_id, lat, lng, updated_at`。Expo push token + 使用者最後已知位置。
+**主鍵是 token（一人可多裝置，故一個 user_id 可對多列）**。
 - token 可直接對 Expo Push API 發推播 → **視同機密**，後台介面只顯示「有/無」即可。
 - 未來後台若要做「平台公告推播」，在 server 端讀這張表打 `https://exp.host/--/api/v2/push/send`。
 - App 端事件推播（新單廣播/獵人出發/新訊息）由 Supabase Edge Function `notify` 負責，後台不用管。
@@ -257,8 +258,9 @@ profiles: id uuid(=auth.users.id), display_name text, avatar_url text, rating nu
   updated_at timestamptz
 ratings: id, order_id, rater_id, ratee_id, stars int(1-5), created_at
 messages: id, order_id, sender_id, content text, created_at
-push_tokens: user_id uuid(pk), token text, lat/lng float8, updated_at timestamptz
+push_tokens: token text(pk), user_id uuid, lat/lng float8, updated_at timestamptz
   # Expo push token，機密：介面只顯示有/無，永遠不要把 token 印在畫面上
+  # 主鍵是 token（一人可多裝置 → 一個 user_id 可對多列）
 wallet_transactions: id, user_id uuid, order_id uuid, kind text, amount int, memo text, created_at
   # 儲值金帳本；sum(amount) 應 = profiles.wallet_balance。後台手動改錢包要補一列 kind='adjustment'
 user_reports: id, reporter_id uuid, reported_id uuid, order_id uuid, reason text,

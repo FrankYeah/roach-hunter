@@ -1413,3 +1413,13 @@ end $$;
 --     $c$);
 --   end if;
 -- end $$;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 第二十二階段：多裝置推播（一人可多 token）
+-- ═══════════════════════════════════════════════════════════════════
+-- 痛點：push_tokens 主鍵是 user_id → 一人只能存一個 token，換手機/多裝置會頂掉。
+-- 改法：主鍵改為 token（裝置維度天生唯一），user_id 加索引；一人多列。
+-- RLS 不變（每列仍 auth.uid() = user_id）。既有資料無痛轉換。
+alter table public.push_tokens drop constraint if exists push_tokens_pkey;
+alter table public.push_tokens add constraint push_tokens_pkey primary key (token);
+create index if not exists push_tokens_user_idx on public.push_tokens (user_id);

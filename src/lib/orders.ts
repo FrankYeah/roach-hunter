@@ -302,6 +302,30 @@ export async function cancelOrder(orderId: string): Promise<void> {
 }
 
 /**
+ * 無人接單補救：把仍在 searching 的訂單加價（提高賞金吸引力）。
+ * 只允許 searching 期間加價（媒合後不能改價）。回傳加價後的新總額，null 表示
+ * 訂單已不在 searching（已被接走 / 取消）→ 呼叫端不必打擾使用者，訂閱會處理跳轉。
+ * is_vip 由 BEFORE INSERT trigger 決定，改價不影響；RLS/守衛允許 client 改自己 searching 單。
+ */
+export async function bumpOrderPrice(
+  orderId: string,
+  delta: number,
+): Promise<{ price: number | null }> {
+  if (!isSupabaseConfigured || !supabase) return { price: null };
+  const current = await fetchOrder(orderId);
+  if (!current || current.status !== 'searching') return { price: null };
+  const next = (current.price ?? 0) + delta;
+  const { data } = await supabase
+    .from('orders')
+    .update({ price: next })
+    .eq('id', orderId)
+    .eq('status', 'searching')
+    .select('price')
+    .maybeSingle();
+  return { price: data ? Number((data as { price: number }).price) : null };
+}
+
+/**
  * 求救者「中途」取消（獵人已出發）：呼叫 SECURITY DEFINER RPC，原子完成
  * status→cancelled + 獵人錢包 +$100 出勤補償 + 其餘預付款退回求救者儲值金。
  * RPC 內驗證呼叫者是該單 client 且狀態仍為 matched（行鎖防與結案互撞）。
