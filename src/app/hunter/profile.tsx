@@ -2,9 +2,17 @@ import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/level-badge';
@@ -12,7 +20,13 @@ import { levelFromCompleted } from '@/constants/brand';
 import { shadowSoft } from '@/constants/shadows';
 import { signOut } from '@/lib/auth';
 import { selectHaptic, successHaptic } from '@/lib/haptics';
-import { fetchProfile, updateProfile, type Gender, type Profile, type VerifyStatus } from '@/lib/profiles';
+import {
+  fetchProfile,
+  updateProfile,
+  type Gender,
+  type Profile,
+  type VerifyStatus,
+} from '@/lib/profiles';
 import { uploadVerificationDoc, type VerifyDoc } from '@/lib/storage';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -92,7 +106,9 @@ function DocStatusRow({
           disabled={busy}
           accessibilityRole="button"
           accessibilityLabel={`上傳${label}`}
-          style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.96 : 1 }], opacity: busy ? 0.6 : 1 }]}
+          style={({ pressed }) => [
+            { transform: [{ scale: pressed ? 0.96 : 1 }], opacity: busy ? 0.6 : 1 },
+          ]}
         >
           <View className="flex-row items-center rounded-full bg-sos px-4 py-2">
             {busy ? (
@@ -100,7 +116,9 @@ function DocStatusRow({
             ) : (
               <Ionicons name="cloud-upload-outline" size={15} color="#FFFFFF" />
             )}
-            <Text className="ml-1 text-xs font-black text-white">{busy ? '上傳中' : rejected ? '重傳' : '上傳'}</Text>
+            <Text className="ml-1 text-xs font-black text-white">
+              {busy ? '上傳中' : rejected ? '重傳' : '上傳'}
+            </Text>
           </View>
         </Pressable>
       )}
@@ -214,7 +232,11 @@ export default function HunterProfileScreen() {
         <Text className="ml-3 text-xl font-black text-ink">個人設定</Text>
       </View>
 
-      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        className="flex-1 px-5"
+        contentContainerStyle={{ paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* 獵人個人卡 */}
         <View className="mt-2 flex-row items-center rounded-3xl bg-white p-4" style={shadowSoft}>
           <View className="h-16 w-16 items-center justify-center rounded-full bg-wood-300">
@@ -222,14 +244,23 @@ export default function HunterProfileScreen() {
           </View>
           <View className="ml-4 flex-1">
             <View className="flex-row items-center">
-              <Text className="text-lg font-black text-ink">{profile?.display_name ?? '見習獵人'}</Text>
+              <Text className="text-lg font-black text-ink">
+                {profile?.display_name ?? '見習獵人'}
+              </Text>
               {idVerified && (
-                <MaterialCommunityIcons name="shield-check" size={16} color="#969DA9" style={{ marginLeft: 6 }} />
+                <MaterialCommunityIcons
+                  name="shield-check"
+                  size={16}
+                  color="#969DA9"
+                  style={{ marginLeft: 6 }}
+                />
               )}
             </View>
             <View className="mt-1 flex-row items-center">
               <LevelBadge level={level} />
-              <Text className="ml-2 text-xs text-mute">已出動 {profile?.completed_tasks ?? 0} 次</Text>
+              <Text className="ml-2 text-xs text-mute">
+                已出動 {profile?.completed_tasks ?? 0} 次
+              </Text>
             </View>
           </View>
         </View>
@@ -287,7 +318,9 @@ export default function HunterProfileScreen() {
                   }`}
                 >
                   <Ionicons name={g.icon} size={14} color={on ? '#FB6B4B' : '#9A8F80'} />
-                  <Text className={`ml-1.5 text-xs font-bold ${on ? 'text-sos' : 'text-ink'}`}>{g.label}</Text>
+                  <Text className={`ml-1.5 text-xs font-bold ${on ? 'text-sos' : 'text-ink'}`}>
+                    {g.label}
+                  </Text>
                 </View>
               </Pressable>
             );
@@ -325,8 +358,14 @@ export default function HunterProfileScreen() {
                         on ? 'border-silver-dark bg-silver-light' : 'border-wood-100 bg-white'
                       }`}
                     >
-                      <Text className={`text-base font-black ${on ? 'text-silver-dark' : 'text-ink'}`}>{km}</Text>
-                      <Text className={`text-[9px] ${on ? 'text-silver-dark' : 'text-mute'}`}>km</Text>
+                      <Text
+                        className={`text-base font-black ${on ? 'text-silver-dark' : 'text-ink'}`}
+                      >
+                        {km}
+                      </Text>
+                      <Text className={`text-[9px] ${on ? 'text-silver-dark' : 'text-mute'}`}>
+                        km
+                      </Text>
                     </View>
                   </Pressable>
                 );
@@ -415,10 +454,24 @@ export default function HunterProfileScreen() {
           className="mt-8"
           style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}
         >
-          <View className="flex-row items-center justify-center rounded-2xl border border-wood-200 bg-white py-3.5" style={shadowSoft}>
+          <View
+            className="flex-row items-center justify-center rounded-2xl border border-wood-200 bg-white py-3.5"
+            style={shadowSoft}
+          >
             <Ionicons name="log-out-outline" size={18} color="#E2553A" />
             <Text className="ml-2 text-sm font-bold text-sos">登出</Text>
           </View>
+        </Pressable>
+
+        {/* 條款與隱私 */}
+        <Pressable
+          onPress={() => router.push({ pathname: '/legal' } as unknown as Href)}
+          accessibilityRole="link"
+          accessibilityLabel="條款與隱私"
+          hitSlop={6}
+          className="mb-2 mt-4 items-center"
+        >
+          <Text className="text-xs font-semibold text-mute underline">條款與隱私</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

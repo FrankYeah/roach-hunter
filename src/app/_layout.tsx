@@ -89,6 +89,8 @@ export default function RootLayout() {
         <Stack.Protected guard={!isAuthenticated}>
           <Stack.Screen name="login" options={{ gestureEnabled: false, animation: 'fade' }} />
         </Stack.Protected>
+        {/* 條款與隱私：登入前後皆可查看（不放進任一 guard）*/}
+        <Stack.Screen name="legal" />
       </Stack>
     </SafeAreaProvider>
   );

@@ -1,7 +1,7 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -310,6 +310,17 @@ export default function ClientProfileScreen() {
           </View>
         </Pressable>
 
+        {/* 條款與隱私 */}
+        <Pressable
+          onPress={() => router.push({ pathname: '/legal' } as unknown as Href)}
+          accessibilityRole="link"
+          accessibilityLabel="條款與隱私"
+          hitSlop={6}
+          className="mt-5 items-center"
+        >
+          <Text className="text-xs font-semibold text-mute underline">條款與隱私</Text>
+        </Pressable>
+
         {/* 刪除帳號（App Store 硬性規定的 App 內刪除入口）*/}
         <Pressable
           onPress={onDeleteAccount}
@@ -317,7 +328,7 @@ export default function ClientProfileScreen() {
           accessibilityRole="button"
           accessibilityLabel="永久刪除帳號"
           hitSlop={6}
-          className="mb-2 mt-5 items-center"
+          className="mb-2 mt-3 items-center"
         >
           <Text className="text-xs font-semibold text-mute underline">
             {deleting ? '刪除中…' : '永久刪除帳號'}

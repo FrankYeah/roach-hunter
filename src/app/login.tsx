@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { router, type Href } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -78,7 +79,10 @@ export default function LoginScreen() {
 
         {/* 品牌 */}
         <View className="mt-8 items-center">
-          <View className="h-20 w-20 items-center justify-center rounded-3xl bg-cream" style={shadowSoft}>
+          <View
+            className="h-20 w-20 items-center justify-center rounded-3xl bg-cream"
+            style={shadowSoft}
+          >
             <MosaicTarget size={44} />
           </View>
           <Text className="mt-4 text-3xl font-black text-ink">{BRAND.appName}</Text>
@@ -88,7 +92,10 @@ export default function LoginScreen() {
         {step === 'phone' ? (
           <View className="mt-12">
             <Text className="mb-2 text-sm font-bold text-ink">手機號碼</Text>
-            <View className="flex-row items-center rounded-2xl border border-wood-200 bg-white px-4" style={shadowSoft}>
+            <View
+              className="flex-row items-center rounded-2xl border border-wood-200 bg-white px-4"
+              style={shadowSoft}
+            >
               <Text className="text-base font-bold text-ink">+886</Text>
               <View className="mx-3 h-6 w-px bg-wood-100" />
               <TextInput
@@ -112,11 +119,16 @@ export default function LoginScreen() {
               className="mt-6"
               style={({ pressed }) => [
                 phoneValid && !busy ? shadowSos : undefined,
-                { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: phoneValid && !busy ? 1 : 0.4 },
+                {
+                  transform: [{ scale: pressed ? 0.98 : 1 }],
+                  opacity: phoneValid && !busy ? 1 : 0.4,
+                },
               ]}
             >
               <View className="items-center rounded-2xl bg-sos py-4">
-                <Text className="text-lg font-black text-white">{busy ? '傳送中…' : '發送驗證碼'}</Text>
+                <Text className="text-lg font-black text-white">
+                  {busy ? '傳送中…' : '發送驗證碼'}
+                </Text>
               </View>
             </Pressable>
           </View>
@@ -135,7 +147,11 @@ export default function LoginScreen() {
                     <View
                       key={i}
                       className={`h-14 w-12 items-center justify-center rounded-2xl border-2 ${
-                        active ? 'border-sos bg-sos/10' : filled ? 'border-wood-300 bg-white' : 'border-wood-100 bg-white'
+                        active
+                          ? 'border-sos bg-sos/10'
+                          : filled
+                            ? 'border-wood-300 bg-white'
+                            : 'border-wood-100 bg-white'
                       }`}
                       style={shadowSoft}
                     >
@@ -169,11 +185,16 @@ export default function LoginScreen() {
               className="mt-8"
               style={({ pressed }) => [
                 otp.length === 6 && !busy ? shadowSos : undefined,
-                { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: otp.length === 6 && !busy ? 1 : 0.4 },
+                {
+                  transform: [{ scale: pressed ? 0.98 : 1 }],
+                  opacity: otp.length === 6 && !busy ? 1 : 0.4,
+                },
               ]}
             >
               <View className="items-center rounded-2xl bg-sos py-4">
-                <Text className="text-lg font-black text-white">{busy ? '驗證中…' : '驗證並登入'}</Text>
+                <Text className="text-lg font-black text-white">
+                  {busy ? '驗證中…' : '驗證並登入'}
+                </Text>
               </View>
             </Pressable>
 
@@ -182,6 +203,32 @@ export default function LoginScreen() {
             </Pressable>
           </View>
         )}
+
+        {/* 條款與隱私 */}
+        <View className="mt-8 flex-row flex-wrap items-center justify-center px-4">
+          <Text className="text-[11px] text-mute">繼續即代表你同意 </Text>
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/legal', params: { doc: 'terms' } } as unknown as Href)
+            }
+            accessibilityRole="link"
+            accessibilityLabel="服務條款"
+            hitSlop={6}
+          >
+            <Text className="text-[11px] font-bold text-ink underline">服務條款</Text>
+          </Pressable>
+          <Text className="text-[11px] text-mute"> 與 </Text>
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/legal', params: { doc: 'privacy' } } as unknown as Href)
+            }
+            accessibilityRole="link"
+            accessibilityLabel="隱私權政策"
+            hitSlop={6}
+          >
+            <Text className="text-[11px] font-bold text-ink underline">隱私權政策</Text>
+          </Pressable>
+        </View>
       </View>
     </SafeAreaView>
   );
