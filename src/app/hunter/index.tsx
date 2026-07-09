@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/level-badge';
 import { MosaicTarget } from '@/components/mosaic-target';
+import { NotificationBell } from '@/components/notification-bell';
 import { TARGET_TIERS, VIP_GOLD, levelFromCompleted, nextLevel } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { PLATFORM_FEE_RATE, SOS_TASKS, netEarning, tierOf, type SosTask } from '@/data/tasks';
@@ -391,6 +392,9 @@ export default function HunterPoolScreen() {
           </Text>
         </View>
         <View className="flex-row items-center">
+          <View className="mr-2">
+            <NotificationBell />
+          </View>
           <Pressable
             onPress={() => router.push('/hunter/profile')}
             accessibilityRole="button"

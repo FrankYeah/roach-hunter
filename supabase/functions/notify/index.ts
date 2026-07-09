@@ -36,6 +36,14 @@ interface PushMessage {
   data: { route: string };
 }
 
+/** 一列 App 內通知（通知中心用；即使收件人沒推播 token 也會留一筆）*/
+interface NotifRow {
+  user_id: string;
+  title: string;
+  body: string;
+  route: string;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -125,6 +133,7 @@ Deno.serve(async (req) => {
     if (!order) return json({ error: 'order_not_found' }, 404);
 
     const pushes: PushMessage[] = [];
+    const notifs: NotifRow[] = []; // 同步寫進通知中心
 
     if (payload.type === 'new_order') {
       // 只有發單人本人、且訂單仍在池子裡，才能觸發廣播
@@ -152,6 +161,7 @@ Deno.serve(async (req) => {
       const profById = new Map((profs ?? []).map((p) => [p.id, p]));
       const busy = new Set((busyRows ?? []).map((r) => r.hunter_id));
       const net = Math.round((order.price ?? 0) * (1 - FEE_RATE));
+      const notified = new Set<string>(); // 每位符合的獵人只留一筆通知（多裝置不重複）
 
       for (const t of tokens ?? []) {
         const p = profById.get(t.user_id);
@@ -177,6 +187,15 @@ Deno.serve(async (req) => {
           priority: 'high',
           data: { route: '/hunter' },
         });
+        if (!notified.has(t.user_id)) {
+          notified.add(t.user_id);
+          notifs.push({
+            user_id: t.user_id,
+            title: '🚨 那個，出現了！',
+            body: `附近出現新任務，淨賺 $${net}`,
+            route: '/hunter',
+          });
+        }
       }
     } else if (payload.type === 'order_accepted') {
       // 只有該單「已媒合的獵人」能觸發，且訂單必須真的在 matched
@@ -191,6 +210,7 @@ Deno.serve(async (req) => {
             distanceMeters(order.hunter_lat, order.hunter_lng, order.location_lat, order.location_lng),
           )} 分鐘後抵達！`
         : '您的獵人已出發，正在趕來的路上！';
+      notifs.push({ user_id: order.client_id, title: '🥾 獵人接單了！', body, route: '/status' });
       for (const to of await tokensFor(admin, order.client_id)) {
         pushes.push({
           to,
@@ -207,6 +227,12 @@ Deno.serve(async (req) => {
       if (order.hunter_id !== uid || order.status !== 'verifying' || !order.client_id) {
         return json({ error: 'forbidden' }, 403);
       }
+      notifs.push({
+        user_id: order.client_id,
+        title: '✅ 獵人回報已消滅目標！',
+        body: '請確認現場狀況，按下「確認完成」後才會結案撥款。',
+        route: '/status',
+      });
       for (const to of await tokensFor(admin, order.client_id)) {
         pushes.push({
           to,
@@ -224,6 +250,12 @@ Deno.serve(async (req) => {
         return json({ error: 'forbidden' }, 403);
       }
       const net = Math.round((order.price ?? 0) * (1 - FEE_RATE));
+      notifs.push({
+        user_id: order.hunter_id,
+        title: '🎉 任務完成，酬勞入帳！',
+        body: `求救者已確認完成，$${net} 已存入你的錢包。`,
+        route: '/hunter',
+      });
       for (const to of await tokensFor(admin, order.hunter_id)) {
         pushes.push({
           to,
@@ -248,6 +280,8 @@ Deno.serve(async (req) => {
           admin.from('profiles').select('display_name').eq('id', uid).maybeSingle(),
         ]);
         const preview = (payload.preview ?? '').trim().slice(0, 60) || '傳來一則新訊息';
+        const route = recipient === order.client_id ? '/status' : '/hunter/task';
+        notifs.push({ user_id: recipient, title: sender?.display_name ?? '新訊息', body: preview, route });
         for (const to of toks) {
           pushes.push({
             to,
@@ -256,13 +290,14 @@ Deno.serve(async (req) => {
             sound: 'default',
             channelId: 'default',
             priority: 'high',
-            data: { route: recipient === order.client_id ? '/status' : '/hunter/task' },
+            data: { route },
           });
         }
       }
     }
 
     const sent = await sendPushes(admin, pushes);
+    if (notifs.length > 0) await admin.from('notifications').insert(notifs);
     return json({ ok: true, sent });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'internal' }, 500);

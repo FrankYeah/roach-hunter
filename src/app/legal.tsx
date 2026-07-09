@@ -40,7 +40,7 @@ const PRIVACY: Section[] = [
   },
   {
     h: '六、聯絡我們',
-    body: '如對本政策有任何疑問，請來信客服信箱（上線前請填入真實信箱）。',
+    body: '如對本政策有任何疑問，請來信客服信箱：hello@ccalways.com。',
   },
 ];
 

@@ -81,6 +81,7 @@ export default function RootLayout() {
           <Stack.Screen name="review" />
           <Stack.Screen name="history" />
           <Stack.Screen name="order-detail" />
+          <Stack.Screen name="notifications" />
           <Stack.Screen name="client/profile" />
           <Stack.Screen name="hunter/index" />
           <Stack.Screen name="hunter/task" />

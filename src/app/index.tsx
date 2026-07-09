@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FlipFlopLogo } from '@/components/flip-flop-logo';
 import { MosaicTarget } from '@/components/mosaic-target';
+import { NotificationBell } from '@/components/notification-bell';
 import { BRAND } from '@/constants/brand';
 import { shadowSoft, shadowSos } from '@/constants/shadows';
 import { NEARBY_HUNTERS, type Hunter } from '@/data/hunters';
@@ -30,7 +31,10 @@ function scatter(center: LatLng): PlacedHunter[] {
     const dist = 1000 + Math.random() * 1000; // 公尺
     const dLat = (dist * Math.cos(angle)) / 111320;
     const dLng = (dist * Math.sin(angle)) / (111320 * Math.cos((center.latitude * Math.PI) / 180));
-    return { ...h, coordinate: { latitude: center.latitude + dLat, longitude: center.longitude + dLng } };
+    return {
+      ...h,
+      coordinate: { latitude: center.latitude + dLat, longitude: center.longitude + dLng },
+    };
   });
 }
 
@@ -105,7 +109,9 @@ export default function HomeScreen() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
           c = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         }
       } catch {
@@ -149,12 +155,19 @@ export default function HomeScreen() {
       {/* 頂部品牌列 */}
       <View className="flex-row items-center justify-between px-5 pb-3 pt-1">
         <View className="flex-row items-center">
-          <View className="mr-2.5 h-10 w-10 items-center justify-center rounded-2xl bg-cream" style={shadowSoft}>
+          <View
+            className="mr-2.5 h-10 w-10 items-center justify-center rounded-2xl bg-cream"
+            style={shadowSoft}
+          >
             <FlipFlopLogo size={24} color="#9A763C" />
           </View>
           <Text className="text-sm font-bold text-mute">{BRAND.tagline}</Text>
         </View>
         <View className="flex-row items-center">
+          {/* 通知中心 */}
+          <View className="mr-2">
+            <NotificationBell />
+          </View>
           {/* 個人設定（名稱 / 地址基底 / 性別）*/}
           <Pressable
             onPress={() => router.push('/client/profile')}
@@ -177,13 +190,21 @@ export default function HomeScreen() {
               <Ionicons name="home" size={14} color="#FFFFFF" />
             </View>
             <Text className="ml-2 text-xs font-bold text-ink">{displayName ?? '求救者'}</Text>
-            <MaterialCommunityIcons name="swap-horizontal" size={14} color="#9A8F80" style={{ marginLeft: 6 }} />
+            <MaterialCommunityIcons
+              name="swap-horizontal"
+              size={14}
+              color="#9A8F80"
+              style={{ marginLeft: 6 }}
+            />
           </Pressable>
         </View>
       </View>
 
       {/* 地圖 */}
-      <View className="mx-4 flex-1 overflow-hidden rounded-[28px] border border-wood-100 bg-cream" style={shadowSoft}>
+      <View
+        className="mx-4 flex-1 overflow-hidden rounded-[28px] border border-wood-100 bg-cream"
+        style={shadowSoft}
+      >
         {region ? (
           <MapView
             style={StyleSheet.absoluteFill}
@@ -206,7 +227,10 @@ export default function HomeScreen() {
             {center && (
               <Marker coordinate={center} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={tracks}>
                 <View className="items-center">
-                  <View className="items-center justify-center rounded-2xl bg-white p-1.5" style={shadowSoft}>
+                  <View
+                    className="items-center justify-center rounded-2xl bg-white p-1.5"
+                    style={shadowSoft}
+                  >
                     <MosaicTarget size={30} />
                   </View>
                   <View className="mt-1 flex-row items-center rounded-full bg-ink px-2 py-0.5">
@@ -229,9 +253,14 @@ export default function HomeScreen() {
         )}
 
         {/* 在線數量浮卡 */}
-        <View className="absolute left-4 top-4 flex-row items-center rounded-full bg-white px-3 py-2" style={shadowSoft}>
+        <View
+          className="absolute left-4 top-4 flex-row items-center rounded-full bg-white px-3 py-2"
+          style={shadowSoft}
+        >
           <View className="mr-2 h-2.5 w-2.5 rounded-full bg-leaf" />
-          <Text className="text-sm font-bold text-ink">附近有 {onlineHunters.length} 位閒置獵人</Text>
+          <Text className="text-sm font-bold text-ink">
+            附近有 {onlineHunters.length} 位閒置獵人
+          </Text>
         </View>
       </View>
 
@@ -240,7 +269,8 @@ export default function HomeScreen() {
         <View className="mb-3 flex-row items-center justify-center">
           <FontAwesome5 name="shoe-prints" size={12} color="#9A8F80" />
           <Text className="ml-2 text-xs text-mute">
-            腳丫子 = 閒置獵人　·　最快的獵人 <Text className="font-bold text-sos">{nearestEta} 分鐘</Text> 到
+            腳丫子 = 閒置獵人　·　最快的獵人{' '}
+            <Text className="font-bold text-sos">{nearestEta} 分鐘</Text> 到
           </Text>
         </View>
 
@@ -257,7 +287,9 @@ export default function HomeScreen() {
             <Text className="ml-3 text-2xl font-black text-white">{BRAND.sosLabel}</Text>
           </View>
         </Pressable>
-        <Text className="mt-2 text-center text-[11px] text-mute">一鍵呼叫・按下後選擇狀況與指導價</Text>
+        <Text className="mt-2 text-center text-[11px] text-mute">
+          一鍵呼叫・按下後選擇狀況與指導價
+        </Text>
       </View>
     </SafeAreaView>
   );

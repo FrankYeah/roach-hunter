@@ -1423,3 +1423,47 @@ end $$;
 alter table public.push_tokens drop constraint if exists push_tokens_pkey;
 alter table public.push_tokens add constraint push_tokens_pkey primary key (token);
 create index if not exists push_tokens_user_idx on public.push_tokens (user_id);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 第二十五階段：通知中心（App 內推播歷史 + 未讀標記）
+-- ═══════════════════════════════════════════════════════════════════
+-- 痛點：推播點掉就沒了。改成每次 notify 發推時同步寫一列 notifications，
+-- App 內留一份可回看的列表 + 未讀紅點。insert 只由 notify 的 service_role 進行；
+-- 一般使用者只能讀自己的、把自己的標記為已讀。
+create table if not exists public.notifications (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  title      text not null,
+  body       text,
+  route      text,
+  read       boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists notifications_user_idx on public.notifications (user_id, created_at desc);
+create index if not exists notifications_unread_idx on public.notifications (user_id) where not read;
+
+alter table public.notifications enable row level security;
+
+drop policy if exists "read own notifications" on public.notifications;
+create policy "read own notifications"
+  on public.notifications for select to authenticated
+  using (user_id = auth.uid());
+
+-- 只允許把「自己的」通知標記為已讀（不開放 insert：只有 service_role 寫入）
+drop policy if exists "update own notifications" on public.notifications;
+create policy "update own notifications"
+  on public.notifications for update to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+-- Realtime：讓 App 能即時收到新通知（未讀紅點即時 +1）
+alter table public.notifications replica identity full;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'notifications'
+  ) then
+    alter publication supabase_realtime add table public.notifications;
+  end if;
+end$$;
