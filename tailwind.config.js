@@ -1,3 +1,5 @@
+// package.json 的 overrides 把 postcss-selector-parser 拉到 ^7.1.6（GHSA-rj75-hqrm-r3gf），Tailwind 3 自己宣告的是 ^6.1.2。
+// 來由、怎麼驗過、什麼時候拿掉，都在 AGENTS.md「相依套件（npm audit）」。
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ['./src/**/*.{js,jsx,ts,tsx}'],
